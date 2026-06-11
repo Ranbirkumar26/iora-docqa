@@ -17,8 +17,8 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")      # gemini | claude
 EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "gemini")  # gemini | voyage
 
 # --- models ---
-GEMINI_MODEL = "gemini-2.0-flash"
-GEMINI_EMBED_MODEL = "text-embedding-004"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_EMBED_MODEL = "gemini-embedding-001"
 CLAUDE_MODEL = "claude-sonnet-4-6"
 VOYAGE_MODEL = "voyage-3.5"
 
@@ -28,7 +28,7 @@ EMBED_DIM = 768
 
 # --- mode detection ---
 # below this total-corpus token estimate -> stuff full context; above -> RAG
-DIRECT_MODE_TOKEN_LIMIT = 150_000
+DIRECT_MODE_TOKEN_LIMIT = int(os.getenv("DIRECT_MODE_TOKEN_LIMIT", "150000"))
 
 # --- chunking (approx chars; ~4 chars per token) ---
 CHUNK_SIZE_CHARS = 3200      # ~800 tokens

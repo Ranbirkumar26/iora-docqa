@@ -21,6 +21,8 @@ def complete(system: str, user: str, max_tokens: int = 2048) -> str:
         config=types.GenerateContentConfig(
             system_instruction=system,
             max_output_tokens=max_tokens,
+            # disable "thinking" so output tokens go to the answer, not reasoning
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
     return resp.text or ""

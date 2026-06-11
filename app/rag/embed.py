@@ -1,5 +1,12 @@
 """Embeddings. Provider switch via EMBED_PROVIDER env (gemini | voyage)."""
-from app.config import EMBED_PROVIDER, GEMINI_API_KEY, GEMINI_EMBED_MODEL, VOYAGE_API_KEY, VOYAGE_MODEL
+from app.config import (
+    EMBED_DIM,
+    EMBED_PROVIDER,
+    GEMINI_API_KEY,
+    GEMINI_EMBED_MODEL,
+    VOYAGE_API_KEY,
+    VOYAGE_MODEL,
+)
 
 _BATCH = 100
 
@@ -25,7 +32,10 @@ def _gemini_embed(texts: list[str], task_type: str) -> list[list[float]]:
         r = _gemini().models.embed_content(
             model=GEMINI_EMBED_MODEL,
             contents=batch,
-            config=types.EmbedContentConfig(task_type=task_type),
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=EMBED_DIM,
+            ),
         )
         out.extend(e.values for e in r.embeddings)
     return out
