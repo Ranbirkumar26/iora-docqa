@@ -4,7 +4,7 @@ import os
 import requests
 import streamlit as st
 
-API = os.getenv("DOCQA_API", "http://localhost:8000")
+API = os.getenv("DOCQA_API", "http://localhost:8000/api")
 
 st.set_page_config(page_title="DocQA", page_icon="📄")
 

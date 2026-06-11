@@ -1,0 +1,98 @@
+// Single API client. Same-origin /api in production (FastAPI serves the SPA);
+// `next dev` proxies /api to localhost:8000 via the rewrite in next.config.mjs.
+
+const BASE = "/api";
+
+export type ApiResult<T> = {
+  data: T | null;
+  error: string | null;
+  status: number;
+};
+
+type CallOpts = {
+  token?: string | null;
+  json?: unknown;
+  form?: FormData;
+};
+
+function asMessage(detail: unknown, status: number): string {
+  if (typeof detail === "string") return detail;
+  if (detail) return JSON.stringify(detail);
+  return `Server error (HTTP ${status})`;
+}
+
+export async function call<T>(
+  method: string,
+  path: string,
+  opts: CallOpts = {},
+): Promise<ApiResult<T>> {
+  const headers: Record<string, string> = {};
+  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+
+  let body: BodyInit | undefined;
+  if (opts.json !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(opts.json);
+  } else if (opts.form) {
+    body = opts.form; // browser sets multipart boundary
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { method, headers, body });
+  } catch {
+    return {
+      data: null,
+      error: "Cannot reach the server. Check your connection and try again.",
+      status: 0,
+    };
+  }
+
+  let payload: unknown = null;
+  try {
+    payload = await res.json();
+  } catch {
+    /* non-JSON body (shouldn't happen on our API) */
+  }
+
+  if (!res.ok) {
+    const detail = (payload as { detail?: unknown } | null)?.detail;
+    return { data: null, error: asMessage(detail, res.status), status: res.status };
+  }
+  return { data: payload as T, error: null, status: res.status };
+}
+
+// ---- API types ----
+export type Status = {
+  total_files: number;
+  total_chars: number;
+  total_tokens: number;
+  mode: "direct" | "rag";
+};
+
+export type FileRow = {
+  id: string;
+  filename: string;
+  file_type: string;
+  char_count: number;
+  upload_date: string;
+  indexed: boolean;
+};
+
+export type UploadResponse = Status & {
+  uploaded: { file_id: string; filename: string; char_count: number }[];
+  replaced: { file_id: string; filename: string; char_count: number }[];
+  skipped: { filename: string; reason: string }[];
+};
+
+export type AskResponse = {
+  answer: string;
+  mode: "direct" | "rag" | "structured" | "none";
+  sources: string[];
+  sql?: string;
+};
+
+export type SummarizeResponse = {
+  summary: string;
+  mode: "direct" | "rag" | "none";
+};

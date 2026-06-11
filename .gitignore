@@ -17,3 +17,9 @@ uploads/
 
 # os
 .DS_Store
+
+# web build artifacts
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts

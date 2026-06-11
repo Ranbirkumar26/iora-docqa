@@ -1,6 +1,18 @@
-"""FastAPI app. Auth + upload + ask + summarize + files management."""
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+"""FastAPI app. API under /api; serves the built web SPA (web/out) at /."""
+from pathlib import Path
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.config import (
@@ -15,6 +27,7 @@ from app.core.summarize import summarize
 from app.db.client import anon_client, service_client
 
 app = FastAPI(title="DocQA")
+api = APIRouter(prefix="/api")
 
 
 @app.exception_handler(RuntimeError)
@@ -43,7 +56,7 @@ def get_user_id(authorization: str = Header(None)) -> str:
     return res.user.id
 
 
-@app.post("/auth/signup")
+@api.post("/auth/signup")
 def signup(body: AuthIn):
     # admin create -> email pre-confirmed, no email round-trip needed for demo
     try:
@@ -55,7 +68,7 @@ def signup(body: AuthIn):
     return {"user_id": res.user.id, "message": "Account created. Now log in."}
 
 
-@app.post("/auth/login")
+@api.post("/auth/login")
 def login(body: AuthIn):
     try:
         res = anon_client().auth.sign_in_with_password(
@@ -67,7 +80,7 @@ def login(body: AuthIn):
 
 
 # ---------- files ----------
-@app.post("/upload")
+@api.post("/upload")
 async def upload(
     files: list[UploadFile] = File(...), user_id: str = Depends(get_user_id)
 ):
@@ -115,7 +128,7 @@ async def upload(
     }
 
 
-@app.get("/files")
+@api.get("/files")
 def list_files(user_id: str = Depends(get_user_id)):
     sb = service_client()
     rows = (
@@ -130,7 +143,7 @@ def list_files(user_id: str = Depends(get_user_id)):
     return {"files": rows}
 
 
-@app.delete("/files/{file_id}")
+@api.delete("/files/{file_id}")
 def delete_file_endpoint(file_id: str, user_id: str = Depends(get_user_id)):
     sb = service_client()
     exists = (
@@ -147,21 +160,29 @@ class AskIn(BaseModel):
     question: str
 
 
-@app.post("/ask")
+@api.post("/ask")
 def ask_endpoint(body: AskIn, user_id: str = Depends(get_user_id)):
     return ask(user_id, body.question)
 
 
-@app.post("/summarize")
+@api.post("/summarize")
 def summarize_endpoint(user_id: str = Depends(get_user_id)):
     return summarize(user_id)
 
 
-@app.get("/status")
+@api.get("/status")
 def status(user_id: str = Depends(get_user_id)):
     return corpus_stats(user_id)
 
 
-@app.get("/health")
+@api.get("/health")
 def health():
     return {"ok": True}
+
+
+app.include_router(api)
+
+# Serve the built web SPA (web/out) at /. Mounted last so /api and /docs win.
+_WEB_DIR = Path(__file__).resolve().parents[2] / "web" / "out"
+if _WEB_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="web")

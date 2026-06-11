@@ -7,7 +7,7 @@ services:
     runtime: docker
     plan: free                 # free tier sleeps when idle (cold start)
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /          # Streamlit root returns 200
+    healthCheckPath: /api/health
     envVars:
       - key: GEMINI_API_KEY
         sync: false             # set in dashboard (secret)
