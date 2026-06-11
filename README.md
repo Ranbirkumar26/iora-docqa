@@ -1,36 +1,61 @@
-# DocQA
+# iORA DocQA
+
+**Live: https://docqa-production.up.railway.app**
 
 Upload txt/csv/xlsx files, ask questions and get summaries grounded in your documents.
 Files persist per user and accumulate into one queryable corpus across sessions.
+Responsive web app: works on desktop and mobile browsers, light/dark theme.
 
-## How it works
+## How it answers
 
-- **Small corpus** (< ~150k tokens) → all text stuffed into Claude's context. Max accuracy.
-- **Large corpus** (≥ 150k tokens) → RAG: chunk → embed (Voyage) → pgvector search → answer.
-- Auto-switches based on total corpus size. No user action.
+Three query paths, picked automatically per question:
+
+- **Direct** (corpus < ~150k tokens): all text stuffed into the model context. Max accuracy.
+- **RAG** (larger corpus): chunk -> embed (Gemini) -> pgvector search -> answer from top passages.
+- **Structured** (quantitative questions over csv/xlsx): the model writes SQL, DuckDB executes
+  it on the real table, the model phrases the exact result. No LLM arithmetic.
+
+Answers cite source filenames; the structured path also exposes the SQL it ran.
 
 ## Stack
 
-FastAPI · Streamlit · Supabase (auth + storage + Postgres + pgvector) · Voyage embeddings · Claude
+| Layer | Tech |
+|---|---|
+| Frontend | Next.js 15 + React 19 + Tailwind v4, static export, light/dark theme |
+| Backend | FastAPI (serves the SPA at `/` and the API under `/api`) |
+| Auth, storage, DB | Supabase (Postgres + pgvector + Storage + Auth, RLS) |
+| LLM + embeddings | Gemini `gemini-2.5-flash-lite` + `gemini-embedding-001` (768d) |
+| Tabular queries | DuckDB (SELECT-only, external access disabled) |
+| Hosting | Railway, single Docker container |
 
 ## Setup
 
-1. Fill `.env` (copy from `.env.template`). Needs `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`,
-   `SUPABASE_SERVICE_KEY` (URL + anon key already filled).
-2. Schema + storage bucket already provisioned in Supabase.
-3. Install: `python -m venv .venv && .venv/bin/pip install -r requirements.txt`
+1. Copy `.env.template` to `.env` and fill: `GEMINI_API_KEY`, `SUPABASE_URL`,
+   `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`.
+2. Apply `app/db/schema.sql` in the Supabase SQL editor; create a private storage
+   bucket named `user-documents`.
+3. Backend deps: `python -m venv .venv && .venv/bin/pip install -r requirements.txt`
+4. Frontend deps: `cd web && npm install`
 
-## Run
+## Run locally
 
 ```bash
-# terminal 1 — API
-.venv/bin/uvicorn app.api.main:app --reload
+# build the SPA once (FastAPI serves web/out)
+cd web && npm run build && cd ..
 
-# terminal 2 — UI
-.venv/bin/streamlit run frontend/app.py
+# serve app + API on :8000
+.venv/bin/uvicorn app.api.main:app --reload
+# open http://localhost:8000
 ```
 
-Open the Streamlit URL → Sign up → Log in → upload files → ask / summarize.
+Frontend development with hot reload (proxies /api to :8000):
+
+```bash
+cd web && npm run dev   # http://localhost:3000
+```
+
+A legacy Streamlit UI remains in `frontend/app.py` for quick local poking:
+`.venv/bin/streamlit run frontend/app.py`.
 
 ## Tests
 
@@ -38,46 +63,44 @@ Open the Streamlit URL → Sign up → Log in → upload files → ask / summari
 .venv/bin/python -m pytest tests/ -q
 ```
 
+## Deploy
+
+Single container: Streamlit-free, FastAPI serves SPA + API on `$PORT`.
+
+- **Railway** (current): `railway up` from the repo root (project already linked).
+  Set the 4 env vars as service variables.
+- **Render**: push to GitHub, New -> Blueprint (reads `render.yaml`), set the 4 secrets.
+- **Local Docker**:
+  ```bash
+  docker build -t docqa .
+  docker run --env-file .env -p 8600:8000 docqa   # http://localhost:8600
+  ```
+
 ## Layout
 
 ```
 app/
-  config.py          settings + thresholds
+  config.py          settings, provider switches, thresholds
   parsers/parse.py   txt/csv/xlsx -> text
-  rag/chunk.py       overlap chunking
-  rag/embed.py       Voyage embeddings
-  llm/claude.py      Claude wrapper
-  db/client.py       Supabase clients
-  db/schema.sql      tables + pgvector + RLS + match_chunks RPC
-  core/corpus.py     size/mode stats + full-text fetch
-  core/ingest.py     upload pipeline
-  core/qa.py         direct + RAG question answering
-  core/summarize.py  direct + RAG summarization
-  api/main.py        FastAPI endpoints
-frontend/app.py      Streamlit UI
+  rag/chunk.py       structure-aware chunking (rows for csv, per-sheet for xlsx)
+  rag/embed.py       Gemini/Voyage embeddings (cached query embeds)
+  llm/               gemini.py, claude.py, provider.py (env-switchable)
+  core/
+    ingest.py        upload pipeline: parse -> store -> hash dedup -> chunk -> embed
+    corpus.py        corpus stats + mode detection + full-text fetch
+    qa.py            ask(): direct / rag / structured routing
+    structured.py    DuckDB SQL path for quantitative questions
+    summarize.py     per-file + overall summaries (map-reduce in RAG mode)
+  db/                supabase clients, schema.sql
+  api/main.py        FastAPI: /api routes + static SPA mount
+web/                 Next.js app (components, theme tokens, iORA branding)
+frontend/app.py      legacy Streamlit UI (local dev only)
+tests/               parser, chunking, structured-SQL safety tests
 ```
 
-## Deploy
+## Notes
 
-Single container runs both: Streamlit UI (public on `$PORT`) + FastAPI (internal `:8000`).
-Verified via `docker build` + local run.
-
-**Render (blueprint):**
-1. Push repo to GitHub.
-2. Render → New → Blueprint → pick repo (reads `render.yaml`).
-3. Set 4 secrets in dashboard: `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`.
-
-**Railway:** New project → Deploy from repo (auto-detects `Dockerfile`) → add the same 4 env vars.
-
-**Local Docker:**
-```bash
-docker build -t docqa .
-docker run --env-file .env -p 8600:8501 docqa   # open http://localhost:8600
-```
-
-Same Supabase project serves all deployments. Render/Railway free tiers sleep when idle (cold start on first hit).
-
-## Notes / future work
-
-- Indexing is inline on upload. For very large batches, move to a background worker.
-- PDF/Word/image support not included (v1 scope).
+- Same filename re-uploaded with new content replaces the old version; identical
+  content is skipped (sha256 dedup).
+- Gemini free tier: 20 requests/min; the API returns a clean 429 when exceeded.
+- Railway free tier sleeps when idle; first request after a pause cold-starts.
