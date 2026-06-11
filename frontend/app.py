@@ -101,9 +101,13 @@ def main_view():
         if err:
             st.sidebar.error(err)
         else:
-            st.sidebar.success(f"Added {len(data['uploaded'])} file(s)")
+            msg = f"Added {len(data['uploaded'])}"
+            if data.get("replaced"):
+                msg += f", replaced {len(data['replaced'])}"
+            st.sidebar.success(msg + " file(s)")
             if data["skipped"]:
-                st.sidebar.warning(f"Skipped: {data['skipped']}")
+                for s in data["skipped"]:
+                    st.sidebar.warning(f"{s['filename']}: {s['reason']}")
             st.rerun()
 
     # file list

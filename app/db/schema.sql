@@ -12,6 +12,7 @@ create table if not exists files (
     storage_path text not null,                  -- path in storage bucket
     char_count   integer not null default 0,
     parsed_text  text,                            -- extracted text (direct mode reads this)
+    content_hash text,                            -- sha256 of raw bytes (dedup / re-index)
     indexed      boolean not null default false, -- embedded into chunks yet?
     upload_date  timestamptz not null default now()
 );
@@ -30,6 +31,7 @@ create table if not exists document_chunks (
 );
 
 create index if not exists idx_files_user on files(user_id);
+create index if not exists idx_files_user_hash on files(user_id, content_hash);
 create index if not exists idx_chunks_user on document_chunks(user_id);
 create index if not exists idx_chunks_file on document_chunks(file_id);
 

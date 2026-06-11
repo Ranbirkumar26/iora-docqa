@@ -5,11 +5,10 @@ from pydantic import BaseModel
 from app.config import (
     MAX_FILE_SIZE_MB,
     MAX_FILES_PER_BATCH,
-    STORAGE_BUCKET,
     SUPPORTED_EXTENSIONS,
 )
 from app.core.corpus import corpus_stats
-from app.core.ingest import ingest_one
+from app.core.ingest import dedupe_check, delete_file, ingest_one
 from app.core.qa import ask
 from app.core.summarize import summarize
 from app.db.client import anon_client, service_client
@@ -68,25 +67,45 @@ async def upload(
     if len(files) > MAX_FILES_PER_BATCH:
         raise HTTPException(400, f"Max {MAX_FILES_PER_BATCH} files per batch")
 
-    uploaded, skipped = [], []
+    uploaded, replaced, skipped = [], [], []
     max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+    allowed = ", ".join(sorted(e.lstrip(".") for e in SUPPORTED_EXTENSIONS))
 
     for uf in files:
         data = await uf.read()
         ext = "." + uf.filename.rsplit(".", 1)[-1].lower() if "." in uf.filename else ""
         if len(data) > max_bytes:
-            skipped.append({"filename": uf.filename, "reason": "exceeds size limit"})
+            skipped.append({
+                "filename": uf.filename,
+                "reason": f"too large ({len(data)/1e6:.1f}MB, max {MAX_FILE_SIZE_MB}MB)",
+            })
             continue
         if ext not in SUPPORTED_EXTENSIONS:
-            skipped.append({"filename": uf.filename, "reason": "unsupported type"})
+            skipped.append({
+                "filename": uf.filename,
+                "reason": f"type '{ext or '?'}' not supported (allowed: {allowed})",
+            })
             continue
+
+        action, info = dedupe_check(user_id, uf.filename, data)
+        if action == "skip":
+            skipped.append({"filename": uf.filename, "reason": info})
+            continue
+        if action == "replace":
+            delete_file(user_id, info)  # drop old version + its chunks
+
         try:
             res = ingest_one(user_id, uf.filename, data)
-            uploaded.append(res)
+            (replaced if action == "replace" else uploaded).append(res)
         except Exception as e:
             skipped.append({"filename": uf.filename, "reason": str(e)})
 
-    return {"uploaded": uploaded, "skipped": skipped, **corpus_stats(user_id)}
+    return {
+        "uploaded": uploaded,
+        "replaced": replaced,
+        "skipped": skipped,
+        **corpus_stats(user_id),
+    }
 
 
 @app.get("/files")
@@ -105,24 +124,14 @@ def list_files(user_id: str = Depends(get_user_id)):
 
 
 @app.delete("/files/{file_id}")
-def delete_file(file_id: str, user_id: str = Depends(get_user_id)):
+def delete_file_endpoint(file_id: str, user_id: str = Depends(get_user_id)):
     sb = service_client()
-    row = (
-        sb.table("files")
-        .select("storage_path")
-        .eq("id", file_id)
-        .eq("user_id", user_id)
-        .execute()
-        .data
+    exists = (
+        sb.table("files").select("id").eq("id", file_id).eq("user_id", user_id).execute().data
     )
-    if not row:
+    if not exists:
         raise HTTPException(404, "File not found")
-    # chunks cascade via FK; remove storage object + metadata row
-    try:
-        sb.storage.from_(STORAGE_BUCKET).remove([row[0]["storage_path"]])
-    except Exception:
-        pass
-    sb.table("files").delete().eq("id", file_id).eq("user_id", user_id).execute()
+    delete_file(user_id, file_id)  # storage + row (+ chunks cascade)
     return {"deleted": file_id, **corpus_stats(user_id)}
 
 

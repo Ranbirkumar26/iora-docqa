@@ -3,13 +3,71 @@
 Indexing is inline (synchronous) for v1 simplicity. For very large batches this
 could be moved to a background worker; noted as future work.
 """
+import hashlib
 import uuid
 
 from app.config import STORAGE_BUCKET
 from app.db.client import service_client
 from app.parsers.parse import parse_file
-from app.rag.chunk import chunk_text
+from app.rag.chunk import chunk_for_type
 from app.rag.embed import embed_documents
+
+
+def _hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def dedupe_check(user_id: str, filename: str, data: bytes):
+    """Decide what to do with an incoming file.
+
+    Returns one of:
+      ("skip", reason)        — identical content already stored
+      ("replace", file_id)    — same filename, changed content -> re-index
+      ("new", None)           — brand new
+    """
+    sb = service_client()
+    h = _hash(data)
+    dup = (
+        sb.table("files")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("content_hash", h)
+        .execute()
+        .data
+    )
+    if dup:
+        return ("skip", "duplicate — identical content already uploaded")
+    same_name = (
+        sb.table("files")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("filename", filename)
+        .execute()
+        .data
+    )
+    if same_name:
+        return ("replace", same_name[0]["id"])
+    return ("new", None)
+
+
+def delete_file(user_id: str, file_id: str) -> None:
+    """Remove a file's storage object + metadata row (chunks cascade via FK)."""
+    sb = service_client()
+    row = (
+        sb.table("files")
+        .select("storage_path")
+        .eq("id", file_id)
+        .eq("user_id", user_id)
+        .execute()
+        .data
+    )
+    if not row:
+        return
+    try:
+        sb.storage.from_(STORAGE_BUCKET).remove([row[0]["storage_path"]])
+    except Exception:
+        pass
+    sb.table("files").delete().eq("id", file_id).eq("user_id", user_id).execute()
 
 
 def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
@@ -29,8 +87,8 @@ def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
         storage_path, data, {"content-type": "application/octet-stream"}
     )
 
-    # 3. metadata row + parsed text (so direct mode reads a column, never
-    #    re-downloads/re-parses). raw bytes stay in storage for export/reprocess.
+    # 3. metadata row + parsed text + content hash (direct mode reads parsed_text;
+    #    content_hash powers dedup / incremental re-index)
     sb.table("files").insert(
         {
             "id": file_id,
@@ -40,12 +98,13 @@ def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
             "storage_path": storage_path,
             "char_count": char_count,
             "parsed_text": text,
+            "content_hash": _hash(data),
             "indexed": False,
         }
     ).execute()
 
-    # 4. chunk + embed + store
-    chunks = chunk_text(text)
+    # 4. chunk (structure-aware) + embed + store
+    chunks = chunk_for_type(text, ext)
     if chunks:
         embeddings = embed_documents(chunks)
         rows = [
