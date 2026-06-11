@@ -31,7 +31,7 @@ export default function Home() {
   if (!ready) {
     return (
       <div className="grid min-h-dvh place-items-center">
-        <Spinner className="h-6 w-6 text-zinc-500" />
+        <Spinner className="h-6 w-6 text-faint" />
       </div>
     );
   }
@@ -40,7 +40,7 @@ export default function Home() {
     return (
       <>
         {expiredMsg && (
-          <p className="bg-amber-500/15 px-4 py-2 text-center text-xs text-amber-300">
+          <p className="bg-amber-500/15 px-4 py-2 text-center text-xs text-amber-700 dark:text-amber-300">
             Your session expired. Please log in again.
           </p>
         )}

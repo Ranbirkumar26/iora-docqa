@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { call, FileRow, Status } from "@/lib/api";
 import { Badge, Card, GhostButton } from "@/components/ui";
+import { Wordmark } from "@/components/Brand";
+import ThemeToggle from "@/components/ThemeToggle";
 import UploadZone from "@/components/UploadZone";
 import FileList from "@/components/FileList";
 import AskPanel from "@/components/AskPanel";
@@ -52,7 +54,7 @@ export default function Dashboard({
         <div className="grid grid-cols-3 gap-2 text-center">
           <div>
             <p className="text-xl font-bold">{status?.total_files ?? "-"}</p>
-            <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+            <p className="text-[11px] uppercase tracking-wide text-faint">
               Files
             </p>
           </div>
@@ -60,7 +62,7 @@ export default function Dashboard({
             <p className="text-xl font-bold">
               {status ? fmtTokens(status.total_tokens) : "-"}
             </p>
-            <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+            <p className="text-[11px] uppercase tracking-wide text-faint">
               Tokens
             </p>
           </div>
@@ -68,7 +70,7 @@ export default function Dashboard({
             <Badge tone={status?.mode === "rag" ? "emerald" : "indigo"}>
               {status?.mode ?? "..."}
             </Badge>
-            <p className="mt-1 text-[11px] uppercase tracking-wide text-zinc-500">
+            <p className="mt-1 text-[11px] uppercase tracking-wide text-faint">
               Mode
             </p>
           </div>
@@ -78,7 +80,7 @@ export default function Dashboard({
       <UploadZone token={token} onDone={refresh} onAuthExpired={onAuthExpired} />
 
       <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
           Your files ({files.length})
         </h3>
         <FileList
@@ -94,20 +96,22 @@ export default function Dashboard({
   return (
     <div className="flex min-h-dvh flex-col">
       {/* header */}
-      <header className="sticky top-0 z-20 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-edge bg-surface/85 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4">
-          <div className="flex items-center gap-2.5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon.svg" alt="" className="h-8 w-8 rounded-lg" />
-            <span className="text-base font-bold tracking-tight">DocQA</span>
+          <div className="flex items-baseline gap-2.5">
+            <Wordmark className="text-[26px]" />
+            <span className="hidden text-[11px] font-semibold uppercase tracking-[0.18em] text-faint sm:block">
+              DocQA
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {status && (
-              <span className="hidden text-xs text-zinc-500 sm:block">
+              <span className="hidden text-xs text-faint sm:block">
                 {status.total_files} file{status.total_files === 1 ? "" : "s"} ·{" "}
                 {fmtTokens(status.total_tokens)} tokens
               </span>
             )}
+            <ThemeToggle />
             <GhostButton onClick={onLogout} className="!min-h-9 !px-3 text-xs">
               Log out
             </GhostButton>
@@ -124,7 +128,7 @@ export default function Dashboard({
           {/* main column */}
           <main className="min-w-0">
             {/* tab bar; Files tab only exists on mobile */}
-            <nav className="mb-5 grid grid-cols-3 rounded-xl bg-zinc-900 p-1 lg:max-w-xs lg:grid-cols-2">
+            <nav className="mb-5 grid grid-cols-3 rounded-xl bg-inset p-1 lg:max-w-xs lg:grid-cols-2">
               {(
                 [
                   ["ask", "Ask"],
@@ -139,8 +143,8 @@ export default function Dashboard({
                     key === "files" ? "lg:hidden" : ""
                   } ${
                     tab === key
-                      ? "bg-zinc-950 text-white shadow"
-                      : "text-zinc-400 hover:text-zinc-200"
+                      ? "bg-panel text-fg shadow"
+                      : "text-muted hover:text-fg"
                   }`}
                 >
                   {label}

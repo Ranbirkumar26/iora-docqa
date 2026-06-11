@@ -1,11 +1,11 @@
 {
-  "name": "DocQA",
-  "short_name": "DocQA",
+  "name": "iORA DocQA",
+  "short_name": "iORA",
   "description": "Ask questions and get summaries grounded in your own documents.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
+  "background_color": "#202B41",
+  "theme_color": "#202B41",
   "icons": [
     {
       "src": "/icon.svg",

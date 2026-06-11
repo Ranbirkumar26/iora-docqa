@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { call } from "@/lib/api";
 import { Alert, Card, Field, PrimaryButton } from "@/components/ui";
+import { Wordmark } from "@/components/Brand";
+import ThemeToggle from "@/components/ThemeToggle";
 
 type Mode = "login" | "signup";
 
@@ -43,25 +45,23 @@ export default function AuthView({
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center px-4 py-10">
+    <main className="relative grid min-h-dvh place-items-center px-4 py-10">
+      <ThemeToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-sm">
         {/* brand */}
         <div className="mb-8 text-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/icon.svg"
-            alt="DocQA"
-            className="mx-auto mb-3 h-14 w-14 rounded-2xl shadow-lg shadow-indigo-950/50"
-          />
-          <h1 className="text-2xl font-bold tracking-tight">DocQA</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <Wordmark className="text-5xl" />
+          <p className="mt-3 text-sm font-medium uppercase tracking-[0.2em] text-faint">
+            DocQA
+          </p>
+          <p className="mt-2 text-sm text-muted">
             Ask questions. Get answers from your documents.
           </p>
         </div>
 
         <Card className="p-6">
           {/* tab switch */}
-          <div className="mb-6 grid grid-cols-2 rounded-xl bg-zinc-800/80 p-1">
+          <div className="mb-6 grid grid-cols-2 rounded-xl bg-inset p-1">
             {(["login", "signup"] as Mode[]).map((m) => (
               <button
                 key={m}
@@ -72,8 +72,8 @@ export default function AuthView({
                 }}
                 className={`min-h-10 rounded-lg text-sm font-medium transition ${
                   mode === m
-                    ? "bg-zinc-950 text-white shadow"
-                    : "text-zinc-400 hover:text-zinc-200"
+                    ? "bg-panel text-fg shadow"
+                    : "text-muted hover:text-fg"
                 }`}
               >
                 {m === "login" ? "Log in" : "Sign up"}
@@ -111,7 +111,7 @@ export default function AuthView({
           </form>
         </Card>
 
-        <p className="mt-6 text-center text-xs text-zinc-500">
+        <p className="mt-6 text-center text-xs text-faint">
           Your files stay private to your account.
         </p>
       </div>

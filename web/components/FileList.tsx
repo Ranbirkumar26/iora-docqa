@@ -5,7 +5,7 @@ import { call, FileRow } from "@/lib/api";
 import { IconFileText, IconGrid, IconTable, IconTrash } from "@/components/icons";
 
 function TypeIcon({ type }: { type: string }) {
-  const cls = "h-4.5 w-4.5 shrink-0 text-zinc-400";
+  const cls = "h-4.5 w-4.5 shrink-0 text-muted";
   if (type === "csv") return <IconTable className={cls} />;
   if (type === "xlsx") return <IconGrid className={cls} />;
   return <IconFileText className={cls} />;
@@ -42,7 +42,7 @@ export default function FileList({
 
   if (!files.length) {
     return (
-      <p className="rounded-xl border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-500">
+      <p className="rounded-xl border border-dashed border-edge px-3 py-6 text-center text-xs text-faint">
         No files yet. Upload some to get started.
       </p>
     );
@@ -53,12 +53,12 @@ export default function FileList({
       {files.map((f) => (
         <li
           key={f.id}
-          className="group flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/40 px-3 py-2.5"
+          className="group flex items-center gap-2.5 rounded-xl border border-edge/80 bg-panel px-3 py-2.5"
         >
           <TypeIcon type={f.file_type} />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm text-zinc-200">{f.filename}</p>
-            <p className="text-[11px] text-zinc-500">
+            <p className="truncate text-sm text-fg">{f.filename}</p>
+            <p className="text-[11px] text-faint">
               {fmtChars(f.char_count)}
               {" · "}
               {new Date(f.upload_date).toLocaleDateString()}
@@ -70,13 +70,13 @@ export default function FileList({
               <button
                 onClick={() => remove(f.id)}
                 disabled={deleting === f.id}
-                className="min-h-9 rounded-lg bg-red-500/15 px-2.5 text-xs font-semibold text-red-300 transition hover:bg-red-500/25 disabled:opacity-50"
+                className="min-h-9 rounded-lg bg-red-500/10 px-2.5 text-xs font-semibold text-red-700 dark:text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
               >
                 {deleting === f.id ? "…" : "Delete"}
               </button>
               <button
                 onClick={() => setConfirming(null)}
-                className="min-h-9 rounded-lg px-2 text-xs text-zinc-400 transition hover:text-zinc-200"
+                className="min-h-9 rounded-lg px-2 text-xs text-muted transition hover:text-fg"
               >
                 Keep
               </button>
@@ -84,7 +84,7 @@ export default function FileList({
           ) : (
             <button
               onClick={() => setConfirming(f.id)}
-              className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-800 hover:text-red-400"
+              className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-inset hover:text-red-400"
               aria-label={`Delete ${f.filename}`}
             >
               <IconTrash className="h-4 w-4" />

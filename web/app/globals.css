@@ -1,8 +1,57 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* manual theme switching: .dark on <html> drives dark: variants */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* semantic tokens -> Tailwind colors (bg-surface, text-fg, border-edge, ...) */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-inset: var(--inset);
+  --color-field: var(--field);
+  --color-edge: var(--edge);
+  --color-edge-strong: var(--edge-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-2: var(--accent-2);
+}
+
+/* iORA palette. Light: airy neutrals + deep violet. Dark: brand navy + lilac. */
 :root {
+  color-scheme: light;
+  --surface: #f4f5f8;
+  --panel: #ffffff;
+  --inset: #edeff4;
+  --field: #ffffff;
+  --edge: #e2e5ec;
+  --edge-strong: #c9cfdb;
+  --fg: #1d2335;
+  --muted: #5b6478;
+  --faint: #8a92a6;
+  --accent: #6d28d9;
+  --accent-hover: #5b21b6;
+  --accent-2: #9d6fe0;
+}
+
+.dark {
   color-scheme: dark;
+  /* brand navy #202B41 is the page background */
+  --surface: #202b41;
+  --panel: #283450;
+  --inset: #303d5c;
+  --field: #243049;
+  --edge: #364360;
+  --edge-strong: #475577;
+  --fg: #edeff6;
+  --muted: #a2abc4;
+  --faint: #7681a0;
+  --accent: #8f6ad8;
+  --accent-hover: #a182e2;
+  --accent-2: #b79bea;
 }
 
 html,
@@ -11,27 +60,32 @@ body {
 }
 
 body {
-  @apply bg-zinc-950 text-zinc-100 antialiased;
+  @apply bg-surface text-fg antialiased;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
 }
 
+.font-brand {
+  font-family: Georgia, "Times New Roman", Times, serif;
+}
+
 ::selection {
-  @apply bg-indigo-500/40;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* slim scrollbars that don't shout */
 * {
   scrollbar-width: thin;
-  scrollbar-color: theme(--color-zinc-700) transparent;
+  scrollbar-color: var(--edge-strong) transparent;
 }
 *::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 *::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-zinc-700;
+  border-radius: 9999px;
+  background: var(--edge-strong);
 }
 *::-webkit-scrollbar-track {
   background: transparent;

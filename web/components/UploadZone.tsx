@@ -88,16 +88,16 @@ export default function UploadZone({
         }}
         className={`w-full rounded-2xl border-2 border-dashed px-4 py-7 text-center transition ${
           drag
-            ? "border-indigo-400 bg-indigo-500/10"
-            : "border-zinc-700 bg-zinc-900/40 hover:border-zinc-500"
+            ? "border-accent bg-accent/10"
+            : "border-edge-strong bg-inset/40 hover:border-accent/60"
         }`}
       >
-        <IconUpload className="mx-auto h-6 w-6 text-zinc-400" />
-        <p className="mt-2 text-sm font-medium text-zinc-200">
+        <IconUpload className="mx-auto h-6 w-6 text-muted" />
+        <p className="mt-2 text-sm font-medium text-fg">
           Tap to choose files
           <span className="hidden sm:inline"> or drag &amp; drop</span>
         </p>
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-faint">
           .txt, .csv, .xlsx (up to 100 files, 10MB each)
         </p>
       </button>
@@ -120,14 +120,14 @@ export default function UploadZone({
             {queued.map((f) => (
               <li
                 key={f.name}
-                className="flex items-center justify-between gap-2 rounded-lg bg-zinc-800/60 px-3 py-2 text-xs"
+                className="flex items-center justify-between gap-2 rounded-lg bg-inset px-3 py-2 text-xs"
               >
                 <span className="truncate">{f.name}</span>
                 <button
                   onClick={() =>
                     setQueued((q) => q.filter((x) => x.name !== f.name))
                   }
-                  className="shrink-0 rounded p-1 text-zinc-400 transition hover:text-red-400"
+                  className="shrink-0 rounded p-1 text-muted transition hover:text-red-400"
                   aria-label={`Remove ${f.name}`}
                 >
                   <IconX className="h-3.5 w-3.5" />
