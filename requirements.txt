@@ -9,8 +9,9 @@ pandas
 openpyxl
 
 # llm + embeddings
-anthropic
-voyageai
+google-genai          # gemini (default, free): LLM + embeddings
+anthropic             # optional: claude provider
+voyageai              # optional: voyage embeddings
 
 # supabase (db + storage + auth + pgvector via RPC)
 supabase

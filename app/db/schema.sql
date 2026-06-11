@@ -1,5 +1,5 @@
 -- DocQA schema. Run in Supabase SQL editor.
--- Requires pgvector. Voyage voyage-3.5 -> 1024 dims.
+-- Requires pgvector. Gemini text-embedding-004 -> 768 dims.
 
 create extension if not exists vector;
 
@@ -24,7 +24,7 @@ create table if not exists document_chunks (
     sheet_name  text,
     chunk_index integer not null,
     content     text not null,
-    embedding   vector(1024),
+    embedding   vector(768),
     created_at  timestamptz not null default now()
 );
 
@@ -53,7 +53,7 @@ create policy chunks_owner on document_chunks
 -- but we still pass user_id explicitly and filter on it.
 create or replace function match_chunks(
     p_user_id     uuid,
-    query_embedding vector(1024),
+    query_embedding vector(768),
     match_count   int default 15
 )
 returns table (

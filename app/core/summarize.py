@@ -1,7 +1,7 @@
 """Summarization. Direct mode = one call; RAG mode = map-reduce per file."""
 from app.core.corpus import corpus_stats, fetch_all_texts
 from app.db.client import service_client
-from app.llm import claude
+from app.llm.provider import complete
 
 SYSTEM = "You are a document assistant that writes clear, faithful summaries."
 
@@ -18,7 +18,7 @@ def summarize(user_id: str) -> dict:
             "First write a separate summary for each file (label it with the "
             "filename). Then write one overall summary combining all documents."
         )
-        summary = claude.complete(SYSTEM, user_msg, max_tokens=3000)
+        summary = complete(SYSTEM, user_msg, max_tokens=3000)
         return {"summary": summary, "mode": "direct"}
 
     # RAG mode: summarize each file from its chunks, then combine (map-reduce)
@@ -39,13 +39,13 @@ def summarize(user_id: str) -> dict:
             or []
         )
         text = "\n".join(c["content"] for c in chunks)
-        s = claude.complete(
+        s = complete(
             SYSTEM, f"Summarize this document ({f['filename']}):\n\n{text}", max_tokens=800
         )
         per_file.append(f"=== {f['filename']} ===\n{s}")
 
     combined = "\n\n".join(per_file)
-    overall = claude.complete(
+    overall = complete(
         SYSTEM,
         f"Individual document summaries below. Write one overall summary:\n\n{combined}",
         max_tokens=1000,

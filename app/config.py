@@ -5,16 +5,26 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- secrets ---
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")  # optional, for claude provider
+VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")        # optional, for voyage embeddings
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
+# --- providers (swap by env without code changes) ---
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")      # gemini | claude
+EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "gemini")  # gemini | voyage
+
 # --- models ---
+GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_EMBED_MODEL = "text-embedding-004"
 CLAUDE_MODEL = "claude-sonnet-4-6"
 VOYAGE_MODEL = "voyage-3.5"
-EMBED_DIM = 1024  # voyage-3.5 default output dimension
+
+# embedding dimension MUST match the active EMBED_PROVIDER + DB schema
+# gemini text-embedding-004 -> 768 ; voyage-3.5 -> 1024
+EMBED_DIM = 768
 
 # --- mode detection ---
 # below this total-corpus token estimate -> stuff full context; above -> RAG

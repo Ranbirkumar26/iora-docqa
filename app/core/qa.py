@@ -1,7 +1,7 @@
 """Question answering. Auto-switches direct (full context) vs RAG (retrieval)."""
 from app.core.corpus import corpus_stats, fetch_all_texts
 from app.db.client import service_client
-from app.llm import claude
+from app.llm.provider import complete
 from app.rag.embed import embed_query
 
 SYSTEM = (
@@ -45,5 +45,5 @@ def ask(user_id: str, question: str) -> dict:
         sources = sorted({r["filename"] for r in rows})
         user_msg = f"Document excerpts:\n\n{context}\n\nQuestion: {question}"
 
-    answer = claude.complete(SYSTEM, user_msg)
+    answer = complete(SYSTEM, user_msg)
     return {"answer": answer, "mode": stats["mode"], "sources": sources}
