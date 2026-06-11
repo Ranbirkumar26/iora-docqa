@@ -10,7 +10,6 @@ VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", "")
 
 # --- models ---
 CLAUDE_MODEL = "claude-sonnet-4-6"

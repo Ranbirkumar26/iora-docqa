@@ -12,10 +12,8 @@ openpyxl
 anthropic
 voyageai
 
-# supabase + postgres/pgvector
+# supabase (db + storage + auth + pgvector via RPC)
 supabase
-psycopg[binary]
-pgvector
 
 # frontend
 streamlit
