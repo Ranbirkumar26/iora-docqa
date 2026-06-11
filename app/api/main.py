@@ -1,5 +1,6 @@
 """FastAPI app. Auth + upload + ask + summarize + files management."""
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.config import (
@@ -14,6 +15,12 @@ from app.core.summarize import summarize
 from app.db.client import anon_client, service_client
 
 app = FastAPI(title="DocQA")
+
+
+@app.exception_handler(RuntimeError)
+def _runtime_error(request: Request, exc: RuntimeError):
+    # e.g. Gemini rate limit -> clean 429 the UI can show
+    return JSONResponse(status_code=429, content={"detail": str(exc)})
 
 
 # ---------- auth ----------

@@ -8,6 +8,9 @@ python-dotenv
 pandas
 openpyxl
 
+# structured-data (SQL) query path
+duckdb
+
 # llm + embeddings
 google-genai          # gemini (default, free): LLM + embeddings
 anthropic             # optional: claude provider

@@ -13,12 +13,15 @@ def _claude():
     return _client
 
 
-def complete(system: str, user: str, max_tokens: int = 2048) -> str:
+def complete(system: str, user: str, max_tokens: int = 2048, temperature: float | None = None) -> str:
     """One-shot completion. Returns concatenated text blocks."""
-    msg = _claude().messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
+    kwargs = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    msg = _claude().messages.create(**kwargs)
     return "".join(b.text for b in msg.content if b.type == "text")

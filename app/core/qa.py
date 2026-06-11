@@ -2,6 +2,7 @@
 import re
 
 from app.core.corpus import corpus_stats, fetch_all_texts
+from app.core.structured import answer_structured, looks_quantitative
 from app.db.client import service_client
 from app.llm.provider import complete
 from app.rag.embed import embed_query
@@ -33,6 +34,13 @@ def ask(user_id: str, question: str) -> dict:
     stats = corpus_stats(user_id)
     if stats["total_files"] == 0:
         return {"answer": "No documents uploaded yet.", "mode": "none", "sources": []}
+
+    # quantitative questions over tabular data -> exact SQL via DuckDB.
+    # falls through to the text path if it can't be answered with SQL.
+    if looks_quantitative(question):
+        s = answer_structured(user_id, question)
+        if s is not None:
+            return s
 
     if stats["mode"] == "direct":
         context = fetch_all_texts(user_id)
