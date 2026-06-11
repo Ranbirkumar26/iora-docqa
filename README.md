@@ -6,6 +6,16 @@ Upload txt/csv/xlsx files, ask questions and get summaries grounded in your docu
 Files persist per user and accumulate into one queryable corpus across sessions.
 Responsive web app: works on desktop and mobile browsers, light/dark theme.
 
+## Screenshots
+
+**Main (dark, brand navy)**
+
+<img src="docs/main.png" alt="Main page in dark mode" width="760">
+
+**Login (light)**
+
+<img src="docs/login.png" alt="Login page in light mode" width="340">
+
 ## How it answers
 
 Three query paths, picked automatically per question:
