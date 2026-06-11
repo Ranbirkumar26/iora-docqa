@@ -1,9 +1,10 @@
 """Corpus-level helpers: size/mode stats and full-text fetch."""
 from app.config import DIRECT_MODE_TOKEN_LIMIT, STORAGE_BUCKET, chars_to_tokens
-from app.db.client import service_client
+from app.db.client import service_client, transient_retry
 from app.parsers.parse import parse_file
 
 
+@transient_retry()
 def corpus_stats(user_id: str) -> dict:
     """Total files/chars/tokens for the user + which mode to use."""
     sb = service_client()
@@ -20,6 +21,7 @@ def corpus_stats(user_id: str) -> dict:
     }
 
 
+@transient_retry()
 def fetch_all_texts(user_id: str) -> str:
     """Download + re-parse every file, concatenated with filename separators.
 
