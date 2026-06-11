@@ -11,6 +11,7 @@ create table if not exists files (
     file_type    text not null,                 -- 'txt' | 'csv' | 'xlsx'
     storage_path text not null,                  -- path in storage bucket
     char_count   integer not null default 0,
+    parsed_text  text,                            -- extracted text (direct mode reads this)
     indexed      boolean not null default false, -- embedded into chunks yet?
     upload_date  timestamptz not null default now()
 );

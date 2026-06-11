@@ -23,14 +23,15 @@ def corpus_stats(user_id: str) -> dict:
 
 @transient_retry()
 def fetch_all_texts(user_id: str) -> str:
-    """Download + re-parse every file, concatenated with filename separators.
+    """Concatenate every file's text (with filename separators) for direct mode.
 
-    Used by direct mode (small corpus) for both Q&A and summarize.
+    Reads pre-parsed text from the DB column (fast, no I/O). Legacy rows without
+    it fall back to download + re-parse from storage.
     """
     sb = service_client()
     files = (
         sb.table("files")
-        .select("storage_path, filename")
+        .select("storage_path, filename, parsed_text")
         .eq("user_id", user_id)
         .order("upload_date")
         .execute()
@@ -39,7 +40,9 @@ def fetch_all_texts(user_id: str) -> str:
     )
     parts = []
     for f in files:
-        data = sb.storage.from_(STORAGE_BUCKET).download(f["storage_path"])
-        text = parse_file(f["filename"], data)
+        text = f.get("parsed_text")
+        if text is None:  # legacy row — fall back to storage
+            data = sb.storage.from_(STORAGE_BUCKET).download(f["storage_path"])
+            text = parse_file(f["filename"], data)
         parts.append(f"=== FILE: {f['filename']} ===\n{text}")
     return "\n\n".join(parts)

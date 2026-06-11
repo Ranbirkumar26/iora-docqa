@@ -1,4 +1,6 @@
 """Embeddings. Provider switch via EMBED_PROVIDER env (gemini | voyage)."""
+from functools import lru_cache
+
 from app.config import (
     EMBED_DIM,
     EMBED_PROVIDER,
@@ -72,7 +74,9 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
     return _gemini_embed(texts, "RETRIEVAL_DOCUMENT")
 
 
+@lru_cache(maxsize=512)
 def embed_query(text: str) -> list[float]:
+    """Embed a search query. Cached: identical repeat questions skip the API call."""
     if EMBED_PROVIDER == "voyage":
         return _voyage_embed([text], "query")[0]
     return _gemini_embed([text], "RETRIEVAL_QUERY")[0]

@@ -29,7 +29,8 @@ def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
         storage_path, data, {"content-type": "application/octet-stream"}
     )
 
-    # 3. metadata row (indexed flips true after chunks land)
+    # 3. metadata row + parsed text (so direct mode reads a column, never
+    #    re-downloads/re-parses). raw bytes stay in storage for export/reprocess.
     sb.table("files").insert(
         {
             "id": file_id,
@@ -38,6 +39,7 @@ def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
             "file_type": ext,
             "storage_path": storage_path,
             "char_count": char_count,
+            "parsed_text": text,
             "indexed": False,
         }
     ).execute()

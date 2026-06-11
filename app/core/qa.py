@@ -1,4 +1,6 @@
 """Question answering. Auto-switches direct (full context) vs RAG (retrieval)."""
+import re
+
 from app.core.corpus import corpus_stats, fetch_all_texts
 from app.db.client import service_client
 from app.llm.provider import complete
@@ -24,6 +26,10 @@ RAG_TOP_K = 15
 
 
 def ask(user_id: str, question: str) -> dict:
+    # light normalize: trim + collapse whitespace (no autocorrect — would mangle
+    # domain terms / proper nouns and hurt retrieval)
+    question = re.sub(r"\s+", " ", question).strip()
+
     stats = corpus_stats(user_id)
     if stats["total_files"] == 0:
         return {"answer": "No documents uploaded yet.", "mode": "none", "sources": []}
