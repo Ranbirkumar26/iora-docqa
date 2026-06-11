@@ -41,7 +41,7 @@ export default function Home() {
       <>
         {expiredMsg && (
           <p className="bg-amber-500/15 px-4 py-2 text-center text-xs text-amber-300">
-            Your session expired — please log in again.
+            Your session expired. Please log in again.
           </p>
         )}
         <AuthView

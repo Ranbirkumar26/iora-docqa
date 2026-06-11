@@ -4,6 +4,7 @@ import { useState } from "react";
 import { call, SummarizeResponse } from "@/lib/api";
 import { Alert, Badge, Card, PrimaryButton, Spinner } from "@/components/ui";
 import Markdown from "@/components/Markdown";
+import { IconClipboard } from "@/components/icons";
 
 export default function SummarizePanel({
   token,
@@ -40,7 +41,7 @@ export default function SummarizePanel({
           disabled={!hasFiles}
           className="w-full sm:w-auto"
         >
-          {busy ? "Summarizing…" : result ? "Regenerate" : "Generate summary"}
+          {busy ? "Summarizing..." : result ? "Regenerate" : "Generate summary"}
         </PrimaryButton>
       </div>
 
@@ -48,17 +49,17 @@ export default function SummarizePanel({
 
       {busy && (
         <Card className="flex items-center gap-3 p-4 text-sm text-zinc-400">
-          <Spinner /> Reading every document — this can take a moment…
+          <Spinner /> Reading every document. This can take a moment...
         </Card>
       )}
 
       {!result && !busy && (
         <div className="rounded-2xl border border-dashed border-zinc-800 px-4 py-10 text-center">
-          <p className="text-3xl">📝</p>
+          <IconClipboard className="mx-auto h-7 w-7 text-zinc-600" />
           <p className="mt-2 text-sm text-zinc-400">
             {hasFiles
               ? "One tap and every document gets summarized."
-              : "Upload documents first — then summarize them all at once."}
+              : "Upload documents first, then summarize them all at once."}
           </p>
         </div>
       )}

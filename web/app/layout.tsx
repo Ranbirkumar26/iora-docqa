@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DocQA — ask your documents",
+  title: "DocQA | Ask your documents",
   description:
     "Upload txt, csv and Excel files, then ask questions and get summaries grounded in your own documents.",
   manifest: "/manifest.json",

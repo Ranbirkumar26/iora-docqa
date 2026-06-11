@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { call, FileRow } from "@/lib/api";
+import { IconFileText, IconGrid, IconTable, IconTrash } from "@/components/icons";
 
-const TYPE_ICON: Record<string, string> = {
-  csv: "📊",
-  xlsx: "📈",
-  txt: "📄",
-};
+function TypeIcon({ type }: { type: string }) {
+  const cls = "h-4.5 w-4.5 shrink-0 text-zinc-400";
+  if (type === "csv") return <IconTable className={cls} />;
+  if (type === "xlsx") return <IconGrid className={cls} />;
+  return <IconFileText className={cls} />;
+}
 
 function fmtChars(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M chars`;
@@ -41,7 +43,7 @@ export default function FileList({
   if (!files.length) {
     return (
       <p className="rounded-xl border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-500">
-        No files yet — upload some to get started.
+        No files yet. Upload some to get started.
       </p>
     );
   }
@@ -53,14 +55,14 @@ export default function FileList({
           key={f.id}
           className="group flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/40 px-3 py-2.5"
         >
-          <span className="text-base">{TYPE_ICON[f.file_type] ?? "📄"}</span>
+          <TypeIcon type={f.file_type} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm text-zinc-200">{f.filename}</p>
             <p className="text-[11px] text-zinc-500">
               {fmtChars(f.char_count)}
               {" · "}
               {new Date(f.upload_date).toLocaleDateString()}
-              {!f.indexed && " · indexing…"}
+              {!f.indexed && " · indexing..."}
             </p>
           </div>
           {confirming === f.id ? (
@@ -82,10 +84,10 @@ export default function FileList({
           ) : (
             <button
               onClick={() => setConfirming(f.id)}
-              className="min-h-9 min-w-9 shrink-0 rounded-lg text-zinc-500 transition hover:bg-zinc-800 hover:text-red-400"
+              className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-800 hover:text-red-400"
               aria-label={`Delete ${f.filename}`}
             >
-              🗑
+              <IconTrash className="h-4 w-4" />
             </button>
           )}
         </li>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AskResponse, call } from "@/lib/api";
 import { Alert, Badge, Card, PrimaryButton, Spinner } from "@/components/ui";
 import Markdown from "@/components/Markdown";
+import { IconChat } from "@/components/icons";
 
 type Entry = { q: string } & AskResponse;
 
@@ -70,13 +71,13 @@ export default function AskPanel({
           placeholder={
             hasFiles
               ? "e.g. Which region generated the most revenue?"
-              : "Upload some documents first, then ask away…"
+              : "Upload some documents first, then ask away"
           }
           className="w-full resize-none rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
         />
         <div className="flex items-center justify-between gap-3">
           <p className="hidden text-xs text-zinc-500 sm:block">
-            Enter to send · Shift+Enter for a new line
+            Enter to send. Shift+Enter for a new line.
           </p>
           <PrimaryButton
             type="submit"
@@ -84,7 +85,7 @@ export default function AskPanel({
             disabled={!question.trim() || !hasFiles}
             className="w-full sm:w-auto"
           >
-            {busy ? "Thinking…" : "Ask"}
+            {busy ? "Thinking..." : "Ask"}
           </PrimaryButton>
         </div>
       </form>
@@ -93,15 +94,15 @@ export default function AskPanel({
 
       {busy && (
         <Card className="flex items-center gap-3 p-4 text-sm text-zinc-400">
-          <Spinner /> Reading your documents…
+          <Spinner /> Reading your documents...
         </Card>
       )}
 
       {history.length === 0 && !busy && (
         <div className="rounded-2xl border border-dashed border-zinc-800 px-4 py-10 text-center">
-          <p className="text-3xl">💬</p>
+          <IconChat className="mx-auto h-7 w-7 text-zinc-600" />
           <p className="mt-2 text-sm text-zinc-400">
-            Answers appear here — grounded in your files, with sources.
+            Answers appear here, grounded in your files, with sources.
           </p>
         </div>
       )}

@@ -30,7 +30,7 @@ export default function AuthView({
       });
       setBusy(false);
       if (r.error) return setError(r.error);
-      setNotice("Account created — logging you in…");
+      setNotice("Account created. Logging you in...");
       // fall through to login with same credentials
     }
 
@@ -47,12 +47,15 @@ export default function AuthView({
       <div className="w-full max-w-sm">
         {/* brand */}
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-2xl shadow-lg shadow-indigo-950/50">
-            📄
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icon.svg"
+            alt="DocQA"
+            className="mx-auto mb-3 h-14 w-14 rounded-2xl shadow-lg shadow-indigo-950/50"
+          />
           <h1 className="text-2xl font-bold tracking-tight">DocQA</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            Ask questions. Get answers from <em>your</em> documents.
+            Ask questions. Get answers from your documents.
           </p>
         </div>
 

@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { call, UploadResponse } from "@/lib/api";
 import { Alert, PrimaryButton } from "@/components/ui";
+import { IconUpload, IconX } from "@/components/icons";
 
 const ACCEPT = ".txt,.csv,.xlsx";
 
@@ -91,13 +92,13 @@ export default function UploadZone({
             : "border-zinc-700 bg-zinc-900/40 hover:border-zinc-500"
         }`}
       >
-        <div className="text-2xl">⬆️</div>
+        <IconUpload className="mx-auto h-6 w-6 text-zinc-400" />
         <p className="mt-2 text-sm font-medium text-zinc-200">
           Tap to choose files
           <span className="hidden sm:inline"> or drag &amp; drop</span>
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          .txt · .csv · .xlsx — up to 100 files, 10MB each
+          .txt, .csv, .xlsx (up to 100 files, 10MB each)
         </p>
       </button>
       <input
@@ -129,14 +130,14 @@ export default function UploadZone({
                   className="shrink-0 rounded p-1 text-zinc-400 transition hover:text-red-400"
                   aria-label={`Remove ${f.name}`}
                 >
-                  ✕
+                  <IconX className="h-3.5 w-3.5" />
                 </button>
               </li>
             ))}
           </ul>
           <PrimaryButton onClick={upload} loading={busy} className="w-full">
             {busy
-              ? "Uploading & indexing…"
+              ? "Uploading and indexing..."
               : `Upload ${queued.length} file${queued.length === 1 ? "" : "s"}`}
           </PrimaryButton>
         </div>

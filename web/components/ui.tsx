@@ -1,6 +1,8 @@
 "use client";
 
-// Tiny shared UI primitives — keeps every panel consistent.
+import { IconX } from "@/components/icons";
+
+// Tiny shared UI primitives. Keeps every panel consistent.
 
 export function Spinner({ className = "h-4 w-4" }: { className?: string }) {
   return (
@@ -53,7 +55,7 @@ export function Alert({
           className="shrink-0 rounded p-0.5 opacity-70 transition hover:opacity-100"
           aria-label="Dismiss"
         >
-          ✕
+          <IconX />
         </button>
       )}
     </div>
