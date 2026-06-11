@@ -1,0 +1,25 @@
+# backend
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+
+# file parsing
+pandas
+openpyxl
+
+# llm + embeddings
+anthropic
+voyageai
+
+# supabase + postgres/pgvector
+supabase
+psycopg[binary]
+pgvector
+
+# frontend
+streamlit
+requests
+
+# tests
+pytest
