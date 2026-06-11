@@ -31,11 +31,15 @@ export function Wordmark({
 }) {
   return (
     <span
-      className={`font-brand relative inline-block font-medium leading-none tracking-tight ${className}`}
+      className={`font-brand inline-block font-medium leading-none tracking-tight ${className}`}
       aria-label="iORA"
     >
-      <Flower className="absolute -top-[0.30em] left-[0.01em] h-[0.42em] w-[0.42em]" />
-      <span aria-hidden="true">&#305;ORA</span>
+      {/* the dotless i gets its own box so the flower self-centers on the stem */}
+      <span aria-hidden="true" className="relative inline-block">
+        <Flower className="absolute -top-[0.08em] left-1/2 h-[0.38em] w-[0.38em] -translate-x-1/2" />
+        &#305;
+      </span>
+      <span aria-hidden="true">ORA</span>
     </span>
   );
 }
