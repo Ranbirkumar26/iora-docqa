@@ -1,0 +1,19 @@
+# Render blueprint — one web service (Streamlit UI public, FastAPI internal).
+# Deploy: push repo to GitHub -> Render -> New -> Blueprint -> pick repo.
+# Then set the 4 secret env vars below in the dashboard.
+services:
+  - type: web
+    name: docqa
+    runtime: docker
+    plan: free                 # free tier sleeps when idle (cold start)
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /          # Streamlit root returns 200
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false             # set in dashboard (secret)
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false

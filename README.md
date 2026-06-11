@@ -57,6 +57,26 @@ app/
 frontend/app.py      Streamlit UI
 ```
 
+## Deploy
+
+Single container runs both: Streamlit UI (public on `$PORT`) + FastAPI (internal `:8000`).
+Verified via `docker build` + local run.
+
+**Render (blueprint):**
+1. Push repo to GitHub.
+2. Render → New → Blueprint → pick repo (reads `render.yaml`).
+3. Set 4 secrets in dashboard: `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`.
+
+**Railway:** New project → Deploy from repo (auto-detects `Dockerfile`) → add the same 4 env vars.
+
+**Local Docker:**
+```bash
+docker build -t docqa .
+docker run --env-file .env -p 8600:8501 docqa   # open http://localhost:8600
+```
+
+Same Supabase project serves all deployments. Render/Railway free tiers sleep when idle (cold start on first hit).
+
 ## Notes / future work
 
 - Indexing is inline on upload. For very large batches, move to a background worker.
