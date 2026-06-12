@@ -17,7 +17,11 @@ def _hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def dedupe_check(organization_id: str, filename: str, data: bytes):
+def _scope_column(use_org: bool) -> str:
+    return "organization_id" if use_org else "user_id"
+
+
+def dedupe_check(scope_id: str, filename: str, data: bytes, use_org: bool = True):
     """Decide what to do with an incoming file.
 
     Returns one of:
@@ -27,10 +31,11 @@ def dedupe_check(organization_id: str, filename: str, data: bytes):
     """
     sb = service_client()
     h = _hash(data)
+    scope_col = _scope_column(use_org)
     dup = (
         sb.table("files")
         .select("id")
-        .eq("organization_id", organization_id)
+        .eq(scope_col, scope_id)
         .eq("content_hash", h)
         .execute()
         .data
@@ -40,7 +45,7 @@ def dedupe_check(organization_id: str, filename: str, data: bytes):
     same_name = (
         sb.table("files")
         .select("id")
-        .eq("organization_id", organization_id)
+        .eq(scope_col, scope_id)
         .eq("filename", filename)
         .execute()
         .data
@@ -50,14 +55,15 @@ def dedupe_check(organization_id: str, filename: str, data: bytes):
     return ("new", None)
 
 
-def delete_file(organization_id: str, file_id: str) -> None:
+def delete_file(scope_id: str, file_id: str, use_org: bool = True) -> None:
     """Remove a file's storage object + metadata row (chunks cascade via FK)."""
     sb = service_client()
+    scope_col = _scope_column(use_org)
     row = (
         sb.table("files")
         .select("storage_path")
         .eq("id", file_id)
-        .eq("organization_id", organization_id)
+        .eq(scope_col, scope_id)
         .execute()
         .data
     )
@@ -67,10 +73,16 @@ def delete_file(organization_id: str, file_id: str) -> None:
         sb.storage.from_(STORAGE_BUCKET).remove([row[0]["storage_path"]])
     except Exception:
         pass
-    sb.table("files").delete().eq("id", file_id).eq("organization_id", organization_id).execute()
+    sb.table("files").delete().eq("id", file_id).eq(scope_col, scope_id).execute()
 
 
-def ingest_one(user_id: str, organization_id: str, filename: str, data: bytes) -> dict:
+def ingest_one(
+    user_id: str,
+    organization_id: str,
+    filename: str,
+    data: bytes,
+    use_org: bool = True,
+) -> dict:
     """Full pipeline for a single file. Raises ValueError on unsupported type."""
     sb = service_client()
 
@@ -80,7 +92,8 @@ def ingest_one(user_id: str, organization_id: str, filename: str, data: bytes) -
 
     file_id = str(uuid.uuid4())
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    storage_path = f"{organization_id}/{file_id}/{filename}"
+    scope_id = organization_id if use_org else user_id
+    storage_path = f"{scope_id}/{file_id}/{filename}"
 
     # 2. store raw bytes
     sb.storage.from_(STORAGE_BUCKET).upload(
@@ -89,37 +102,38 @@ def ingest_one(user_id: str, organization_id: str, filename: str, data: bytes) -
 
     # 3. metadata row + parsed text + content hash (direct mode reads parsed_text;
     #    content_hash powers dedup / incremental re-index)
-    sb.table("files").insert(
-        {
-            "id": file_id,
-            "organization_id": organization_id,
-            "user_id": user_id,
-            "filename": filename,
-            "file_type": ext,
-            "storage_path": storage_path,
-            "char_count": char_count,
-            "parsed_text": text,
-            "content_hash": _hash(data),
-            "indexed": False,
-        }
-    ).execute()
+    file_row = {
+        "id": file_id,
+        "user_id": user_id,
+        "filename": filename,
+        "file_type": ext,
+        "storage_path": storage_path,
+        "char_count": char_count,
+        "parsed_text": text,
+        "content_hash": _hash(data),
+        "indexed": False,
+    }
+    if use_org:
+        file_row["organization_id"] = organization_id
+    sb.table("files").insert(file_row).execute()
 
     # 4. chunk (structure-aware) + embed + store
     chunks = chunk_for_type(text, ext)
     if chunks:
         embeddings = embed_documents(chunks)
-        rows = [
-            {
+        rows = []
+        for i, (c, e) in enumerate(zip(chunks, embeddings)):
+            row = {
                 "user_id": user_id,
-                "organization_id": organization_id,
                 "file_id": file_id,
                 "filename": filename,
                 "chunk_index": i,
                 "content": c,
                 "embedding": str(e),  # pgvector accepts text form "[...]"
             }
-            for i, (c, e) in enumerate(zip(chunks, embeddings))
-        ]
+            if use_org:
+                row["organization_id"] = organization_id
+            rows.append(row)
         sb.table("document_chunks").insert(rows).execute()
 
     # 5. mark indexed

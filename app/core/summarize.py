@@ -6,13 +6,17 @@ from app.llm.provider import complete
 SYSTEM = "You are a document assistant that writes clear, faithful summaries."
 
 
-def summarize(organization_id: str) -> dict:
-    stats = corpus_stats(organization_id)
+def _scope_column(use_org: bool) -> str:
+    return "organization_id" if use_org else "user_id"
+
+
+def summarize(scope_id: str, use_org: bool = True) -> dict:
+    stats = corpus_stats(scope_id, use_org)
     if stats["total_files"] == 0:
         return {"summary": "No documents uploaded yet.", "mode": "none"}
 
     if stats["mode"] == "direct":
-        context = fetch_all_texts(organization_id)
+        context = fetch_all_texts(scope_id, use_org)
         user_msg = (
             f"Documents:\n\n{context}\n\n"
             "First write a separate summary for each file (label it with the "
@@ -26,7 +30,7 @@ def summarize(organization_id: str) -> dict:
     files = (
         sb.table("files")
         .select("id, filename")
-        .eq("organization_id", organization_id)
+        .eq(_scope_column(use_org), scope_id)
         .execute()
         .data
         or []

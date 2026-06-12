@@ -72,12 +72,16 @@ def _table_stats(tables: list[tuple[str, pd.DataFrame, str]]) -> str:
     return "\n".join(parts)
 
 
-def _source_files(organization_id: str) -> list[str]:
+def _scope_column(use_org: bool) -> str:
+    return "organization_id" if use_org else "user_id"
+
+
+def _source_files(scope_id: str, use_org: bool = True) -> list[str]:
     rows = (
         service_client()
         .table("files")
         .select("filename")
-        .eq("organization_id", organization_id)
+        .eq(_scope_column(use_org), scope_id)
         .order("upload_date")
         .execute()
         .data
@@ -86,8 +90,8 @@ def _source_files(organization_id: str) -> list[str]:
     return [r["filename"] for r in rows]
 
 
-def _corpus_context(organization_id: str) -> str:
-    context = fetch_all_texts(organization_id)
+def _corpus_context(scope_id: str, use_org: bool = True) -> str:
+    context = fetch_all_texts(scope_id, use_org)
     if len(context) <= MAX_REPORT_CONTEXT_CHARS:
         return context
     return (
@@ -169,9 +173,10 @@ def get_report(organization_id: str, report_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def generate_report(user_id: str, organization_id: str) -> dict:
+def generate_report(user_id: str, organization_id: str, use_org: bool = True) -> dict:
     """Generate an executive report over the user's current corpus."""
-    stats = corpus_stats(organization_id)
+    scope_id = organization_id if use_org else user_id
+    stats = corpus_stats(scope_id, use_org)
     if stats["total_files"] == 0:
         return {
             "id": None,
@@ -180,14 +185,15 @@ def generate_report(user_id: str, organization_id: str) -> dict:
             "sources": [],
             "structured_analysis": "",
             "qualitative_analysis": "",
+            "job_id": None,
         }
 
-    job_id = create_job(user_id, organization_id, "report_generation")
+    job_id = create_job(user_id, organization_id, "report_generation") if use_org else None
     try:
-        sources = _source_files(organization_id)
-        tables = load_tables(organization_id)
+        sources = _source_files(scope_id, use_org)
+        tables = load_tables(scope_id, use_org)
         structured = _table_stats(tables)
-        context = _corpus_context(organization_id)
+        context = _corpus_context(scope_id, use_org)
         qualitative = _qualitative_analysis(context)
 
         prompt = (
@@ -202,13 +208,25 @@ def generate_report(user_id: str, organization_id: str) -> dict:
             "The final report must be grounded only in the supplied analysis and files."
         )
         report = complete(SYSTEM, prompt, max_tokens=3000, temperature=0)
-        saved = _save_report(
-            user_id, organization_id, report, stats["mode"], sources, structured, qualitative
-        )
-        update_job(job_id, "completed", metadata={"report_id": saved["id"]})
+        if use_org:
+            saved = _save_report(
+                user_id,
+                organization_id,
+                report,
+                stats["mode"],
+                sources,
+                structured,
+                qualitative,
+            )
+            saved_id = saved["id"]
+            created_at = saved["created_at"]
+            update_job(job_id, "completed", metadata={"report_id": saved_id})
+        else:
+            saved_id = None
+            created_at = None
         return {
-            "id": saved["id"],
-            "created_at": saved["created_at"],
+            "id": saved_id,
+            "created_at": created_at,
             "report": report,
             "mode": stats["mode"],
             "sources": sources,
@@ -217,7 +235,8 @@ def generate_report(user_id: str, organization_id: str) -> dict:
             "job_id": job_id,
         }
     except Exception as e:
-        update_job(job_id, "failed", detail=str(e))
+        if job_id:
+            update_job(job_id, "failed", detail=str(e))
         raise
 
 

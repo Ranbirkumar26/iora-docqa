@@ -27,7 +27,12 @@ SYSTEM = (
 RAG_TOP_K = 15
 
 
-def ask(user_id: str, organization_id: str, question: str) -> dict:
+def ask(
+    user_id: str,
+    organization_id: str,
+    question: str,
+    use_org: bool = True,
+) -> dict:
     # light normalize: trim + collapse whitespace (no autocorrect — would mangle
     # domain terms / proper nouns and hurt retrieval)
     question = re.sub(r"\s+", " ", question).strip()
@@ -43,7 +48,8 @@ def ask(user_id: str, organization_id: str, question: str) -> dict:
         }
 
     mem = memory_block(user_id)
-    stats = corpus_stats(organization_id)
+    scope_id = organization_id if use_org else user_id
+    stats = corpus_stats(scope_id, use_org)
 
     # 2) no documents: answer from memory if we have any, else say so
     if stats["total_files"] == 0:
@@ -59,27 +65,26 @@ def ask(user_id: str, organization_id: str, question: str) -> dict:
 
     # 3) quantitative questions over tabular data -> exact SQL via DuckDB
     if looks_quantitative(question):
-        s = answer_structured(organization_id, question)
+        s = answer_structured(scope_id, question, use_org)
         if s is not None:
             return s
 
     if stats["mode"] == "direct":
-        context = fetch_all_texts(organization_id)
+        context = fetch_all_texts(scope_id, use_org)
         user_msg = f"Documents:\n\n{context}\n\nQuestion: {question}"
         sources = []
     else:
         emb = embed_query(question)
         sb = service_client()
+        rpc_args = {
+            "p_user_id": user_id,
+            "query_embedding": str(emb),
+            "match_count": RAG_TOP_K,
+        }
+        if use_org:
+            rpc_args["p_organization_id"] = organization_id
         rows = (
-            sb.rpc(
-                "match_chunks",
-                {
-                    "p_user_id": user_id,
-                    "p_organization_id": organization_id,
-                    "query_embedding": str(emb),
-                    "match_count": RAG_TOP_K,
-                },
-            )
+            sb.rpc("match_chunks", rpc_args)
             .execute()
             .data
             or []

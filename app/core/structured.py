@@ -51,7 +51,11 @@ def _uniq(base: str, used: set) -> str:
     return name
 
 
-def load_tables(organization_id: str):
+def _scope_column(use_org: bool) -> str:
+    return "organization_id" if use_org else "user_id"
+
+
+def load_tables(scope_id: str, use_org: bool = True):
     """Load the user's csv/xlsx files into DuckDB-ready DataFrames.
 
     Returns list of (table_name, DataFrame, source_filename).
@@ -60,7 +64,7 @@ def load_tables(organization_id: str):
     files = (
         sb.table("files")
         .select("filename, file_type, storage_path")
-        .eq("organization_id", organization_id)
+        .eq(_scope_column(use_org), scope_id)
         .in_("file_type", list(TABULAR))
         .execute()
         .data
@@ -149,9 +153,9 @@ _ANSWER_SYS = (
 )
 
 
-def answer_structured(organization_id: str, question: str):
+def answer_structured(scope_id: str, question: str, use_org: bool = True):
     """Try to answer via SQL. Returns dict or None (falls back to text path)."""
-    tables = load_tables(organization_id)
+    tables = load_tables(scope_id, use_org)
     if not tables:
         return None
 

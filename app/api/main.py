@@ -34,6 +34,10 @@ app = FastAPI(title="DocQA")
 api = APIRouter(prefix="/api")
 
 
+def _scope_column(ctx: AuthContext) -> str:
+    return "organization_id" if ctx.org_enabled else "user_id"
+
+
 @app.exception_handler(RuntimeError)
 def _runtime_error(request: Request, exc: RuntimeError):
     # e.g. Gemini rate limit -> clean 429 the UI can show
@@ -96,12 +100,14 @@ async def upload(
     if len(files) > MAX_FILES_PER_BATCH:
         raise HTTPException(400, f"Max {MAX_FILES_PER_BATCH} files per batch")
 
-    job_id = create_job(
-        ctx.user_id,
-        ctx.organization_id,
-        "document_ingestion",
-        detail=f"{len(files)} file(s) queued for synchronous ingestion",
-    )
+    job_id = None
+    if ctx.org_enabled:
+        job_id = create_job(
+            ctx.user_id,
+            ctx.organization_id,
+            "document_ingestion",
+            detail=f"{len(files)} file(s) queued for synchronous ingestion",
+        )
     uploaded, replaced, skipped = [], [], []
     max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
     allowed = ", ".join(sorted(e.lstrip(".") for e in SUPPORTED_EXTENSIONS))
@@ -122,34 +128,41 @@ async def upload(
             })
             continue
 
-        action, info = dedupe_check(ctx.organization_id, uf.filename, data)
+        action, info = dedupe_check(ctx.scope_id, uf.filename, data, ctx.org_enabled)
         if action == "skip":
             skipped.append({"filename": uf.filename, "reason": info})
             continue
         if action == "replace":
-            delete_file(ctx.organization_id, info)  # drop old version + its chunks
+            delete_file(ctx.scope_id, info, ctx.org_enabled)
 
         try:
-            res = ingest_one(ctx.user_id, ctx.organization_id, uf.filename, data)
+            res = ingest_one(
+                ctx.user_id,
+                ctx.organization_id,
+                uf.filename,
+                data,
+                ctx.org_enabled,
+            )
             (replaced if action == "replace" else uploaded).append(res)
         except Exception as e:
             skipped.append({"filename": uf.filename, "reason": str(e)})
 
-    update_job(
-        job_id,
-        "completed",
-        metadata={
-            "uploaded": len(uploaded),
-            "replaced": len(replaced),
-            "skipped": len(skipped),
-        },
-    )
+    if job_id:
+        update_job(
+            job_id,
+            "completed",
+            metadata={
+                "uploaded": len(uploaded),
+                "replaced": len(replaced),
+                "skipped": len(skipped),
+            },
+        )
     return {
         "job_id": job_id,
         "uploaded": uploaded,
         "replaced": replaced,
         "skipped": skipped,
-        **corpus_stats(ctx.organization_id),
+        **corpus_stats(ctx.scope_id, ctx.org_enabled),
     }
 
 
@@ -159,7 +172,7 @@ def list_files(ctx: AuthContext = Depends(get_auth_context)):
     rows = (
         sb.table("files")
         .select("id, filename, file_type, char_count, upload_date, indexed")
-        .eq("organization_id", ctx.organization_id)
+        .eq(_scope_column(ctx), ctx.scope_id)
         .order("upload_date", desc=True)
         .execute()
         .data
@@ -175,14 +188,14 @@ def delete_file_endpoint(file_id: str, ctx: AuthContext = Depends(get_auth_conte
         sb.table("files")
         .select("id")
         .eq("id", file_id)
-        .eq("organization_id", ctx.organization_id)
+        .eq(_scope_column(ctx), ctx.scope_id)
         .execute()
         .data
     )
     if not exists:
         raise HTTPException(404, "File not found")
-    delete_file(ctx.organization_id, file_id)  # storage + row (+ chunks cascade)
-    return {"deleted": file_id, **corpus_stats(ctx.organization_id)}
+    delete_file(ctx.scope_id, file_id, ctx.org_enabled)
+    return {"deleted": file_id, **corpus_stats(ctx.scope_id, ctx.org_enabled)}
 
 
 # ---------- query ----------
@@ -192,26 +205,30 @@ class AskIn(BaseModel):
 
 @api.post("/ask")
 def ask_endpoint(body: AskIn, ctx: AuthContext = Depends(get_auth_context)):
-    return ask(ctx.user_id, ctx.organization_id, body.question)
+    return ask(ctx.user_id, ctx.organization_id, body.question, ctx.org_enabled)
 
 
 @api.post("/summarize")
 def summarize_endpoint(ctx: AuthContext = Depends(get_auth_context)):
-    return summarize(ctx.organization_id)
+    return summarize(ctx.scope_id, ctx.org_enabled)
 
 
 @api.post("/report")
 def report_endpoint(ctx: AuthContext = Depends(get_auth_context)):
-    return generate_report(ctx.user_id, ctx.organization_id)
+    return generate_report(ctx.user_id, ctx.organization_id, ctx.org_enabled)
 
 
 @api.get("/reports")
 def reports_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    if not ctx.org_enabled:
+        return {"reports": []}
     return {"reports": list_reports(ctx.organization_id)}
 
 
 @api.get("/reports/{report_id}")
 def report_detail_endpoint(report_id: str, ctx: AuthContext = Depends(get_auth_context)):
+    if not ctx.org_enabled:
+        raise HTTPException(404, "Report history is not enabled until org schema is applied")
     report = get_report(ctx.organization_id, report_id)
     if not report:
         raise HTTPException(404, "Report not found")
@@ -220,15 +237,18 @@ def report_detail_endpoint(report_id: str, ctx: AuthContext = Depends(get_auth_c
 
 @api.get("/jobs")
 def jobs_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    if not ctx.org_enabled:
+        return {"jobs": []}
     return {"jobs": list_jobs(ctx.organization_id)}
 
 
 @api.get("/status")
 def status(ctx: AuthContext = Depends(get_auth_context)):
     return {
-        **corpus_stats(ctx.organization_id),
+        **corpus_stats(ctx.scope_id, ctx.org_enabled),
         "organization_id": ctx.organization_id,
         "organization_name": ctx.organization_name,
+        "org_enabled": ctx.org_enabled,
     }
 
 

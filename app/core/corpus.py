@@ -4,14 +4,18 @@ from app.db.client import service_client, transient_retry
 from app.parsers.parse import parse_file
 
 
+def _scope_column(use_org: bool) -> str:
+    return "organization_id" if use_org else "user_id"
+
+
 @transient_retry()
-def corpus_stats(organization_id: str) -> dict:
-    """Total files/chars/tokens for the organisation + which mode to use."""
+def corpus_stats(scope_id: str, use_org: bool = True) -> dict:
+    """Total files/chars/tokens for the active scope + which mode to use."""
     sb = service_client()
     res = (
         sb.table("files")
         .select("char_count")
-        .eq("organization_id", organization_id)
+        .eq(_scope_column(use_org), scope_id)
         .execute()
     )
     rows = res.data or []
@@ -27,7 +31,7 @@ def corpus_stats(organization_id: str) -> dict:
 
 
 @transient_retry()
-def fetch_all_texts(organization_id: str) -> str:
+def fetch_all_texts(scope_id: str, use_org: bool = True) -> str:
     """Concatenate every file's text (with filename separators) for direct mode.
 
     Reads pre-parsed text from the DB column (fast, no I/O). Legacy rows without
@@ -37,7 +41,7 @@ def fetch_all_texts(organization_id: str) -> str:
     files = (
         sb.table("files")
         .select("storage_path, filename, parsed_text")
-        .eq("organization_id", organization_id)
+        .eq(_scope_column(use_org), scope_id)
         .order("upload_date")
         .execute()
         .data

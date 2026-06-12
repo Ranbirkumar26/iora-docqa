@@ -70,6 +70,7 @@ export type Status = {
   mode: "direct" | "rag";
   organization_id?: string;
   organization_name?: string;
+  org_enabled?: boolean;
 };
 
 export type FileRow = {
@@ -82,7 +83,7 @@ export type FileRow = {
 };
 
 export type UploadResponse = Status & {
-  job_id?: string;
+  job_id?: string | null;
   uploaded: { file_id: string; filename: string; char_count: number }[];
   replaced: { file_id: string; filename: string; char_count: number }[];
   skipped: { filename: string; reason: string }[];
@@ -108,8 +109,8 @@ export type SummarizeResponse = {
 
 export type ReportResponse = {
   id: string | null;
-  created_at?: string;
-  job_id?: string;
+  created_at?: string | null;
+  job_id?: string | null;
   report: string;
   mode: "direct" | "rag" | "none";
   sources: string[];
