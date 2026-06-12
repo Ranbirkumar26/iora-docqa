@@ -12,6 +12,7 @@ const MODE_TONE = {
   direct: "indigo",
   rag: "emerald",
   structured: "amber",
+  memory: "indigo",
   none: "zinc",
 } as const;
 
@@ -19,6 +20,7 @@ const MODE_HINT = {
   direct: "answered from the full text of your documents",
   rag: "answered from the most relevant passages",
   structured: "computed exactly with SQL over your tables",
+  memory: "answered from your saved memory",
   none: "",
 } as const;
 
@@ -60,10 +62,12 @@ export default function AskPanel({
   token,
   hasFiles,
   onAuthExpired,
+  onAnswered,
 }: {
   token: string;
   hasFiles: boolean;
   onAuthExpired: () => void;
+  onAnswered?: () => void;
 }) {
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -87,6 +91,7 @@ export default function AskPanel({
 
     setHistory((h) => [{ q, ...r.data! }, ...h]);
     setQuestion("");
+    if (r.data.mode === "memory") onAnswered?.(); // refresh sidebar memory list
   }
 
   return (

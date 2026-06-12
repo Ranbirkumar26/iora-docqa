@@ -22,6 +22,7 @@ from app.config import (
 )
 from app.core.corpus import corpus_stats
 from app.core.ingest import dedupe_check, delete_file, ingest_one
+from app.core.memory import delete_memory, list_memories
 from app.core.qa import ask
 from app.core.summarize import summarize
 from app.db.client import anon_client, service_client
@@ -173,6 +174,18 @@ def summarize_endpoint(user_id: str = Depends(get_user_id)):
 @api.get("/status")
 def status(user_id: str = Depends(get_user_id)):
     return corpus_stats(user_id)
+
+
+# ---------- memory ----------
+@api.get("/memories")
+def list_memories_endpoint(user_id: str = Depends(get_user_id)):
+    return {"memories": list_memories(user_id)}
+
+
+@api.delete("/memories/{mem_id}")
+def delete_memory_endpoint(mem_id: str, user_id: str = Depends(get_user_id)):
+    delete_memory(user_id, mem_id)
+    return {"deleted": mem_id}
 
 
 @api.get("/health")

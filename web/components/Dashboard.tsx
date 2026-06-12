@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { call, FileRow, Status } from "@/lib/api";
+import { call, FileRow, Memory, Status } from "@/lib/api";
 import { Badge, Card, GhostButton } from "@/components/ui";
 import { Wordmark } from "@/components/Brand";
+import { IconTrash } from "@/components/icons";
 import ThemeToggle from "@/components/ThemeToggle";
 import UploadZone from "@/components/UploadZone";
 import FileList from "@/components/FileList";
@@ -30,16 +31,24 @@ export default function Dashboard({
   const [tab, setTab] = useState<Tab>("ask");
   const [status, setStatus] = useState<Status | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
+  const [memories, setMemories] = useState<Memory[]>([]);
 
   const refresh = useCallback(async () => {
-    const [s, f] = await Promise.all([
+    const [s, f, m] = await Promise.all([
       call<Status>("GET", "/status", { token }),
       call<{ files: FileRow[] }>("GET", "/files", { token }),
+      call<{ memories: Memory[] }>("GET", "/memories", { token }),
     ]);
     if (s.status === 401 || f.status === 401) return onAuthExpired();
     if (s.data) setStatus(s.data);
     if (f.data) setFiles(f.data.files);
+    if (m.data) setMemories(m.data.memories);
   }, [token, onAuthExpired]);
+
+  async function deleteMemory(id: string) {
+    await call("DELETE", `/memories/${id}`, { token });
+    refresh();
+  }
 
   useEffect(() => {
     refresh();
@@ -89,6 +98,39 @@ export default function Dashboard({
           onChanged={refresh}
           onAuthExpired={onAuthExpired}
         />
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
+          Memory ({memories.length})
+        </h3>
+        {memories.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-edge px-3 py-4 text-center text-[11px] leading-relaxed text-faint">
+            Type &quot;remember ...&quot; when you ask, e.g. &quot;remember my
+            name is Ranbir&quot;. Saved facts are used to answer questions about
+            you.
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {memories.map((m) => (
+              <li
+                key={m.id}
+                className="flex items-center gap-2 rounded-xl border border-edge/80 bg-panel px-3 py-2"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm text-fg">
+                  {m.content}
+                </span>
+                <button
+                  onClick={() => deleteMemory(m.id)}
+                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-inset hover:text-red-400"
+                  aria-label={`Forget: ${m.content}`}
+                >
+                  <IconTrash className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -158,6 +200,7 @@ export default function Dashboard({
                   token={token}
                   hasFiles={hasFiles}
                   onAuthExpired={onAuthExpired}
+                  onAnswered={refresh}
                 />
               )}
               {tab === "summarize" && (
@@ -177,6 +220,7 @@ export default function Dashboard({
                       token={token}
                       hasFiles={hasFiles}
                       onAuthExpired={onAuthExpired}
+                      onAnswered={refresh}
                     />
                   </div>
                 </>

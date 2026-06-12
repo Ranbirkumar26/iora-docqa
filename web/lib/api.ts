@@ -87,9 +87,15 @@ export type UploadResponse = Status & {
 
 export type AskResponse = {
   answer: string;
-  mode: "direct" | "rag" | "structured" | "none";
+  mode: "direct" | "rag" | "structured" | "memory" | "none";
   sources: string[];
   sql?: string;
+};
+
+export type Memory = {
+  id: string;
+  content: string;
+  created_at: string;
 };
 
 export type SummarizeResponse = {

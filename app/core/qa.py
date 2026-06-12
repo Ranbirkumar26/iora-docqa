@@ -2,6 +2,7 @@
 import re
 
 from app.core.corpus import corpus_stats, fetch_all_texts
+from app.core.memory import add_memory, detect_remember, memory_block
 from app.core.structured import answer_structured, looks_quantitative
 from app.db.client import service_client
 from app.llm.provider import complete
@@ -31,12 +32,32 @@ def ask(user_id: str, question: str) -> dict:
     # domain terms / proper nouns and hurt retrieval)
     question = re.sub(r"\s+", " ", question).strip()
 
-    stats = corpus_stats(user_id)
-    if stats["total_files"] == 0:
-        return {"answer": "No documents uploaded yet.", "mode": "none", "sources": []}
+    # 1) explicit "remember ..." -> save the fact, confirm, skip doc lookup
+    fact = detect_remember(question)
+    if fact:
+        saved = add_memory(user_id, fact)
+        return {
+            "answer": f"Got it. I will remember that: {saved}",
+            "mode": "memory",
+            "sources": [],
+        }
 
-    # quantitative questions over tabular data -> exact SQL via DuckDB.
-    # falls through to the text path if it can't be answered with SQL.
+    mem = memory_block(user_id)
+    stats = corpus_stats(user_id)
+
+    # 2) no documents: answer from memory if we have any, else say so
+    if stats["total_files"] == 0:
+        if not mem:
+            return {"answer": "No documents uploaded yet.", "mode": "none", "sources": []}
+        answer = complete(
+            "You are a helpful assistant. Answer using only the known user facts "
+            "below. If the answer is not among them, say you do not have that "
+            "information yet.",
+            f"{mem}\n\nQuestion: {question}",
+        )
+        return {"answer": answer, "mode": "memory", "sources": []}
+
+    # 3) quantitative questions over tabular data -> exact SQL via DuckDB
     if looks_quantitative(question):
         s = answer_structured(user_id, question)
         if s is not None:
@@ -68,5 +89,7 @@ def ask(user_id: str, question: str) -> dict:
         sources = sorted({r["filename"] for r in rows})
         user_msg = f"Document excerpts:\n\n{context}\n\nQuestion: {question}"
 
-    answer = complete(SYSTEM, user_msg)
+    # inject saved user facts alongside the document grounding
+    system = SYSTEM + (f"\n\n{mem}" if mem else "")
+    answer = complete(system, user_msg)
     return {"answer": answer, "mode": stats["mode"], "sources": sources}
