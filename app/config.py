@@ -6,18 +6,20 @@ load_dotenv()
 
 # --- secrets ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")            # fallback LLM when Gemini rate-limits
+QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")            # fallback LLM (OpenRouter)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")            # fallback LLM (Groq Cloud)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")  # optional, for claude provider
 VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")        # optional, for voyage embeddings
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
-# --- providers (swap by env without code changes) ---
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")      # gemini | claude
+# --- LLM fallback chain ---
+# Ordered, comma-separated provider names. First is the everyday primary; each
+# next is tried when the previous is rate-limited. Providers without a key set
+# are skipped, so the chain works incrementally as keys are added.
+LLM_CHAIN = os.getenv("LLM_CHAIN", "qwen,groq,gemini")  # qwen | groq | gemini | claude
 EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "gemini")  # gemini | voyage
-# automatic fallback to Qwen when the primary LLM is rate-limited (set QWEN_API_KEY)
-LLM_FALLBACK = os.getenv("LLM_FALLBACK", "qwen")        # qwen | "" (disable)
 
 # --- models ---
 GEMINI_MODEL = "gemini-2.5-flash-lite"
@@ -25,12 +27,18 @@ GEMINI_EMBED_MODEL = "gemini-embedding-001"
 CLAUDE_MODEL = "claude-sonnet-4-6"
 VOYAGE_MODEL = "voyage-3.5"
 
-# Qwen via an OpenAI-compatible endpoint. Default = Alibaba DashScope (intl).
-# OpenRouter override: base https://openrouter.ai/api/v1, model qwen/qwen-2.5-72b-instruct
-QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen-plus")
-QWEN_BASE_URL = os.getenv(
-    "QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-)
+# Qwen via OpenRouter (OpenAI-compatible). Free model; coder-tuned but usable.
+# Swap QWEN_MODEL to a general :free Qwen for better prose Q&A.
+QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen/qwen3-coder:free")
+QWEN_BASE_URL = os.getenv("QWEN_BASE_URL", "https://openrouter.ai/api/v1")
+
+# OpenRouter ranking headers (optional, harmless on other endpoints)
+OPENROUTER_REFERER = os.getenv("OPENROUTER_REFERER", "https://docqa-production.up.railway.app")
+OPENROUTER_TITLE = os.getenv("OPENROUTER_TITLE", "iORA DocQA")
+
+# Groq (OpenAI-compatible). Fast, generous free tier.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
 # embedding dimension MUST match the active EMBED_PROVIDER + DB schema
 # gemini text-embedding-004 -> 768 ; voyage-3.5 -> 1024
