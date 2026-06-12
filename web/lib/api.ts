@@ -68,6 +68,8 @@ export type Status = {
   total_chars: number;
   total_tokens: number;
   mode: "direct" | "rag";
+  organization_id?: string;
+  organization_name?: string;
 };
 
 export type FileRow = {
@@ -80,6 +82,7 @@ export type FileRow = {
 };
 
 export type UploadResponse = Status & {
+  job_id?: string;
   uploaded: { file_id: string; filename: string; char_count: number }[];
   replaced: { file_id: string; filename: string; char_count: number }[];
   skipped: { filename: string; reason: string }[];
@@ -101,4 +104,34 @@ export type Memory = {
 export type SummarizeResponse = {
   summary: string;
   mode: "direct" | "rag" | "none";
+};
+
+export type ReportResponse = {
+  id: string | null;
+  created_at?: string;
+  job_id?: string;
+  report: string;
+  mode: "direct" | "rag" | "none";
+  sources: string[];
+  structured_analysis: string;
+  qualitative_analysis: string;
+};
+
+export type ReportRow = {
+  id: string;
+  title: string;
+  report: string;
+  mode: "direct" | "rag" | "none";
+  sources: string[];
+  created_at: string;
+};
+
+export type JobRow = {
+  id: string;
+  kind: string;
+  status: "queued" | "running" | "completed" | "failed";
+  detail: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 };

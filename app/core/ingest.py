@@ -17,7 +17,7 @@ def _hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def dedupe_check(user_id: str, filename: str, data: bytes):
+def dedupe_check(organization_id: str, filename: str, data: bytes):
     """Decide what to do with an incoming file.
 
     Returns one of:
@@ -30,7 +30,7 @@ def dedupe_check(user_id: str, filename: str, data: bytes):
     dup = (
         sb.table("files")
         .select("id")
-        .eq("user_id", user_id)
+        .eq("organization_id", organization_id)
         .eq("content_hash", h)
         .execute()
         .data
@@ -40,7 +40,7 @@ def dedupe_check(user_id: str, filename: str, data: bytes):
     same_name = (
         sb.table("files")
         .select("id")
-        .eq("user_id", user_id)
+        .eq("organization_id", organization_id)
         .eq("filename", filename)
         .execute()
         .data
@@ -50,14 +50,14 @@ def dedupe_check(user_id: str, filename: str, data: bytes):
     return ("new", None)
 
 
-def delete_file(user_id: str, file_id: str) -> None:
+def delete_file(organization_id: str, file_id: str) -> None:
     """Remove a file's storage object + metadata row (chunks cascade via FK)."""
     sb = service_client()
     row = (
         sb.table("files")
         .select("storage_path")
         .eq("id", file_id)
-        .eq("user_id", user_id)
+        .eq("organization_id", organization_id)
         .execute()
         .data
     )
@@ -67,10 +67,10 @@ def delete_file(user_id: str, file_id: str) -> None:
         sb.storage.from_(STORAGE_BUCKET).remove([row[0]["storage_path"]])
     except Exception:
         pass
-    sb.table("files").delete().eq("id", file_id).eq("user_id", user_id).execute()
+    sb.table("files").delete().eq("id", file_id).eq("organization_id", organization_id).execute()
 
 
-def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
+def ingest_one(user_id: str, organization_id: str, filename: str, data: bytes) -> dict:
     """Full pipeline for a single file. Raises ValueError on unsupported type."""
     sb = service_client()
 
@@ -80,7 +80,7 @@ def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
 
     file_id = str(uuid.uuid4())
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    storage_path = f"{user_id}/{file_id}/{filename}"
+    storage_path = f"{organization_id}/{file_id}/{filename}"
 
     # 2. store raw bytes
     sb.storage.from_(STORAGE_BUCKET).upload(
@@ -92,6 +92,7 @@ def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
     sb.table("files").insert(
         {
             "id": file_id,
+            "organization_id": organization_id,
             "user_id": user_id,
             "filename": filename,
             "file_type": ext,
@@ -110,6 +111,7 @@ def ingest_one(user_id: str, filename: str, data: bytes) -> dict:
         rows = [
             {
                 "user_id": user_id,
+                "organization_id": organization_id,
                 "file_id": file_id,
                 "filename": filename,
                 "chunk_index": i,

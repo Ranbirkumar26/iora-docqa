@@ -1,10 +1,21 @@
 # iORA DocQA
 
-**Live: https://docqa-production.up.railway.app**
+**Repository copy:** https://github.com/Ranbirkumar26/iora-docqa-copy
+**Original live deployment:** https://docqa-production.up.railway.app
 
-Upload txt/csv/xlsx files, ask questions and get summaries grounded in your documents.
+Upload txt/csv/xlsx/pdf/docx files, ask questions and get summaries grounded in your documents.
 Files persist per user and accumulate into one queryable corpus across sessions.
 Responsive web app: works on desktop and mobile browsers, light/dark theme.
+Each user gets a personal organisation workspace by default, so corpus data is
+scoped by `organization_id` and can grow into team multi-tenancy.
+
+## Current Additions
+
+- Organisation-scoped corpus data via default personal workspaces.
+- Saved report history as an organisation knowledge repository.
+- Processing job records for upload/report workflows; these are synchronous today
+  and ready to be moved to background workers later.
+- PDF and DOCX extraction alongside txt/csv/xlsx.
 
 ## Screenshots
 
@@ -24,6 +35,9 @@ Query paths, picked automatically per question:
 - **RAG** (larger corpus): chunk -> embed (Gemini) -> pgvector search -> answer from top passages.
 - **Structured** (quantitative questions over csv/xlsx): the model writes SQL, DuckDB executes
   it on the real table, the model phrases the exact result. No LLM arithmetic.
+- **Report**: deterministic table stats plus qualitative extraction are synthesized into an
+  executive report with findings, risks, opportunities, and recommendations.
+  Generated reports are saved to the organisation's report history.
 - **Memory**: facts you ask it to remember are answered from saved memory (see below).
 
 Answers cite source filenames; the structured path also exposes the SQL it ran.
@@ -62,6 +76,7 @@ Reorder anytime with the `LLM_CHAIN` env var, no code change.
 | LLM | Fallback chain: Groq -> Gemini -> Qwen (all free tiers) |
 | Embeddings | Gemini `gemini-embedding-001` (768d) |
 | Tabular queries | DuckDB (SELECT-only, external access disabled) |
+| Document parsing | pandas/openpyxl, pypdf, python-docx |
 | Hosting | Railway, single Docker container |
 
 ## Setup
@@ -70,7 +85,9 @@ Reorder anytime with the `LLM_CHAIN` env var, no code change.
    `SUPABASE_SERVICE_KEY`, plus at least one LLM key (`GROQ_API_KEY`, `GEMINI_API_KEY`,
    `QWEN_API_KEY`). Gemini is required for embeddings. Missing LLM keys are skipped in the chain.
 2. Apply `app/db/schema.sql` in the Supabase SQL editor; create a private storage
-   bucket named `user-documents`.
+   bucket named `user-documents`. Re-run the schema after updates; it includes
+   idempotent `alter table ... add column if not exists` and backfill SQL for
+   organisation workspaces.
 3. Backend deps: `python -m venv .venv && .venv/bin/pip install -r requirements.txt`
 4. Frontend deps: `cd web && npm install`
 
@@ -118,7 +135,7 @@ Single container: Streamlit-free, FastAPI serves SPA + API on `$PORT`.
 ```
 app/
   config.py          settings, provider switches, thresholds
-  parsers/parse.py   txt/csv/xlsx -> text
+  parsers/parse.py   txt/csv/xlsx/pdf/docx -> text
   rag/chunk.py       structure-aware chunking (rows for csv, per-sheet for xlsx)
   rag/embed.py       Gemini/Voyage embeddings (cached query embeds)
   llm/               provider.py (fallback chain), gemini.py, groq.py, qwen.py,
@@ -128,6 +145,9 @@ app/
     corpus.py        corpus stats + mode detection + full-text fetch
     qa.py            ask(): memory / direct / rag / structured routing
     structured.py    DuckDB SQL path for quantitative questions
+    report.py        deterministic stats + qualitative synthesis -> report
+    jobs.py          sync job records now, ready for async workers later
+    orgs.py          personal organisation workspace helpers
     summarize.py     per-file + overall summaries (map-reduce in RAG mode)
     memory.py        per-user remember/recall (capture, store, inject)
   db/                supabase clients, schema.sql
@@ -141,6 +161,8 @@ tests/               parser, chunking, structured-SQL, fallback, memory tests
 
 - Same filename re-uploaded with new content replaces the old version; identical
   content is skipped (sha256 dedup).
+- Upload/report job records are created synchronously today; the schema is shaped
+  so a queue/worker can update the same records later.
 - Free LLM tiers are rate-limited (Groq/Gemini/Qwen); the chain falls through on 429
   and only returns 429 to the client when every configured provider is exhausted.
 - Railway free tier sleeps when idle; first request after a pause cold-starts.

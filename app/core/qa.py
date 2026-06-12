@@ -27,7 +27,7 @@ SYSTEM = (
 RAG_TOP_K = 15
 
 
-def ask(user_id: str, question: str) -> dict:
+def ask(user_id: str, organization_id: str, question: str) -> dict:
     # light normalize: trim + collapse whitespace (no autocorrect — would mangle
     # domain terms / proper nouns and hurt retrieval)
     question = re.sub(r"\s+", " ", question).strip()
@@ -43,7 +43,7 @@ def ask(user_id: str, question: str) -> dict:
         }
 
     mem = memory_block(user_id)
-    stats = corpus_stats(user_id)
+    stats = corpus_stats(organization_id)
 
     # 2) no documents: answer from memory if we have any, else say so
     if stats["total_files"] == 0:
@@ -59,12 +59,12 @@ def ask(user_id: str, question: str) -> dict:
 
     # 3) quantitative questions over tabular data -> exact SQL via DuckDB
     if looks_quantitative(question):
-        s = answer_structured(user_id, question)
+        s = answer_structured(organization_id, question)
         if s is not None:
             return s
 
     if stats["mode"] == "direct":
-        context = fetch_all_texts(user_id)
+        context = fetch_all_texts(organization_id)
         user_msg = f"Documents:\n\n{context}\n\nQuestion: {question}"
         sources = []
     else:
@@ -75,6 +75,7 @@ def ask(user_id: str, question: str) -> dict:
                 "match_chunks",
                 {
                     "p_user_id": user_id,
+                    "p_organization_id": organization_id,
                     "query_embedding": str(emb),
                     "match_count": RAG_TOP_K,
                 },

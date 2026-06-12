@@ -7,6 +7,8 @@ python-dotenv
 # file parsing
 pandas
 openpyxl
+pypdf
+python-docx
 
 # structured-data (SQL) query path
 duckdb

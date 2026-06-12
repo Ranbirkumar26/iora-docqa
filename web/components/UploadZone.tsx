@@ -5,7 +5,7 @@ import { call, UploadResponse } from "@/lib/api";
 import { Alert, PrimaryButton } from "@/components/ui";
 import { IconUpload, IconX } from "@/components/icons";
 
-const ACCEPT = ".txt,.csv,.xlsx";
+const ACCEPT = ".txt,.csv,.xlsx,.pdf,.docx";
 
 export default function UploadZone({
   token,
@@ -98,7 +98,7 @@ export default function UploadZone({
           <span className="hidden sm:inline"> or drag &amp; drop</span>
         </p>
         <p className="mt-1 text-xs text-faint">
-          .txt, .csv, .xlsx (up to 100 files, 10MB each)
+          .txt, .csv, .xlsx, .pdf, .docx (up to 100 files, 10MB each)
         </p>
       </button>
       <input

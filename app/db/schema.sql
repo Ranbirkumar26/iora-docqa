@@ -1,14 +1,32 @@
 -- DocQA schema. Run in Supabase SQL editor.
--- Requires pgvector. Gemini text-embedding-004 -> 768 dims.
+-- Requires pgvector. Gemini gemini-embedding-001 -> 768 dims.
 
 create extension if not exists vector;
+
+-- ===== Organisations: multi-tenant workspace boundary =====
+create table if not exists organizations (
+    id          uuid primary key default gen_random_uuid(),
+    name        text not null,
+    created_by  uuid references auth.users(id) on delete set null,
+    created_at  timestamptz not null default now()
+);
+
+create table if not exists organization_members (
+    organization_id uuid not null references organizations(id) on delete cascade,
+    user_id         uuid not null references auth.users(id) on delete cascade,
+    role            text not null default 'member'
+                    check (role in ('owner', 'admin', 'member')),
+    created_at      timestamptz not null default now(),
+    primary key (organization_id, user_id)
+);
 
 -- one row per uploaded file
 create table if not exists files (
     id           uuid primary key default gen_random_uuid(),
+    organization_id uuid references organizations(id) on delete cascade,
     user_id      uuid not null references auth.users(id) on delete cascade,
     filename     text not null,
-    file_type    text not null,                 -- 'txt' | 'csv' | 'xlsx'
+    file_type    text not null,                 -- 'txt' | 'csv' | 'xlsx' | 'pdf' | 'docx'
     storage_path text not null,                  -- path in storage bucket
     char_count   integer not null default 0,
     parsed_text  text,                            -- extracted text (direct mode reads this)
@@ -17,9 +35,13 @@ create table if not exists files (
     upload_date  timestamptz not null default now()
 );
 
+alter table files
+    add column if not exists organization_id uuid references organizations(id) on delete cascade;
+
 -- one row per text chunk (RAG path)
 create table if not exists document_chunks (
     id          uuid primary key default gen_random_uuid(),
+    organization_id uuid references organizations(id) on delete cascade,
     user_id     uuid not null references auth.users(id) on delete cascade,
     file_id     uuid not null references files(id) on delete cascade,
     filename    text not null,
@@ -30,31 +52,191 @@ create table if not exists document_chunks (
     created_at  timestamptz not null default now()
 );
 
+alter table document_chunks
+    add column if not exists organization_id uuid references organizations(id) on delete cascade;
+
+-- saved generated reports: organisation knowledge repository
+create table if not exists reports (
+    id                    uuid primary key default gen_random_uuid(),
+    organization_id       uuid not null references organizations(id) on delete cascade,
+    user_id               uuid references auth.users(id) on delete set null,
+    title                 text not null default 'Corpus report',
+    report                text not null,
+    structured_analysis   text,
+    qualitative_analysis  text,
+    sources               jsonb not null default '[]'::jsonb,
+    mode                  text not null default 'direct',
+    created_at            timestamptz not null default now()
+);
+
+-- sync job records now; future background workers can update these rows async
+create table if not exists processing_jobs (
+    id              uuid primary key default gen_random_uuid(),
+    organization_id uuid not null references organizations(id) on delete cascade,
+    user_id          uuid references auth.users(id) on delete set null,
+    kind             text not null,
+    status           text not null default 'queued'
+                     check (status in ('queued', 'running', 'completed', 'failed')),
+    detail           text,
+    metadata         jsonb not null default '{}'::jsonb,
+    created_at       timestamptz not null default now(),
+    updated_at       timestamptz not null default now()
+);
+
+-- per-user memory facts
+create table if not exists memories (
+    id          uuid primary key default gen_random_uuid(),
+    user_id     uuid not null references auth.users(id) on delete cascade,
+    content     text not null,
+    created_at  timestamptz not null default now()
+);
+
 create index if not exists idx_files_user on files(user_id);
 create index if not exists idx_files_user_hash on files(user_id, content_hash);
+create index if not exists idx_files_org on files(organization_id);
+create index if not exists idx_files_org_hash on files(organization_id, content_hash);
 create index if not exists idx_chunks_user on document_chunks(user_id);
+create index if not exists idx_chunks_org on document_chunks(organization_id);
 create index if not exists idx_chunks_file on document_chunks(file_id);
+create index if not exists idx_reports_org_created on reports(organization_id, created_at desc);
+create index if not exists idx_jobs_org_created on processing_jobs(organization_id, created_at desc);
+
+-- Backfill existing users/rows when this schema is applied to an older project.
+insert into organizations (name, created_by)
+select
+    coalesce(nullif(split_part(u.email, '@', 1), ''), 'Personal') || '''s workspace',
+    u.id
+from auth.users u
+where not exists (
+    select 1 from organization_members om where om.user_id = u.id
+);
+
+insert into organization_members (organization_id, user_id, role)
+select o.id, o.created_by, 'owner'
+from organizations o
+where o.created_by is not null
+  and not exists (
+      select 1 from organization_members om
+      where om.organization_id = o.id and om.user_id = o.created_by
+  );
+
+update files f
+set organization_id = om.organization_id
+from organization_members om
+where f.organization_id is null and f.user_id = om.user_id;
+
+update document_chunks c
+set organization_id = f.organization_id
+from files f
+where c.organization_id is null and c.file_id = f.id;
 
 -- approximate-nearest-neighbour index for similarity search
 create index if not exists idx_chunks_embedding on document_chunks
     using ivfflat (embedding vector_cosine_ops) with (lists = 100);
 
--- ===== Row Level Security: a user touches only their own rows =====
+-- ===== Row Level Security: org members touch only their org rows =====
+alter table organizations enable row level security;
+alter table organization_members enable row level security;
 alter table files enable row level security;
 alter table document_chunks enable row level security;
+alter table reports enable row level security;
+alter table processing_jobs enable row level security;
+alter table memories enable row level security;
+
+drop policy if exists orgs_member_select on organizations;
+create policy orgs_member_select on organizations
+    for select
+    using (
+        id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    );
+
+drop policy if exists org_members_same_org on organization_members;
+create policy org_members_same_org on organization_members
+    for select
+    using (user_id = (select auth.uid()));
 
 drop policy if exists files_owner on files;
 create policy files_owner on files
-    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+    for all
+    using (
+        user_id = (select auth.uid())
+        or organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    )
+    with check (
+        user_id = (select auth.uid())
+        or organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    );
 
 drop policy if exists chunks_owner on document_chunks;
 create policy chunks_owner on document_chunks
-    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+    for all
+    using (
+        user_id = (select auth.uid())
+        or organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    )
+    with check (
+        user_id = (select auth.uid())
+        or organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    );
+
+drop policy if exists reports_member on reports;
+create policy reports_member on reports
+    for all
+    using (
+        organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    )
+    with check (
+        organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    );
+
+drop policy if exists jobs_member on processing_jobs;
+create policy jobs_member on processing_jobs
+    for all
+    using (
+        organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    )
+    with check (
+        organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    );
+
+drop policy if exists memories_owner on memories;
+create policy memories_owner on memories
+    for all
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 
 -- ===== Vector search RPC: top-k chunks for a user =====
--- Called from backend. SECURITY DEFINER so it runs the ivfflat scan,
--- but we still pass user_id explicitly and filter on it.
+-- Called from backend. Filters by organisation_id first, with user_id fallback
+-- for legacy rows not yet backfilled with organisation_id.
 create or replace function match_chunks(
+    p_organization_id uuid,
     p_user_id     uuid,
     query_embedding vector(768),
     match_count   int default 15
@@ -71,7 +253,8 @@ as $$
         c.filename,
         1 - (c.embedding <=> query_embedding) as similarity
     from document_chunks c
-    where c.user_id = p_user_id
+    where c.organization_id = p_organization_id
+       or (c.organization_id is null and c.user_id = p_user_id)
     order by c.embedding <=> query_embedding
     limit match_count;
 $$;

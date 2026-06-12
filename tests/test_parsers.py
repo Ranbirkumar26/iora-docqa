@@ -4,7 +4,14 @@ import io
 import pandas as pd
 import pytest
 
-from app.parsers.parse import parse_file, parse_txt, parse_csv, parse_xlsx
+from app.parsers.parse import (
+    parse_file,
+    parse_txt,
+    parse_csv,
+    parse_xlsx,
+    parse_docx,
+    parse_pdf,
+)
 
 
 def test_txt():
@@ -40,10 +47,40 @@ def test_xlsx_multi_sheet():
     assert "a: foo" in out
 
 
+def test_docx_paragraphs_and_tables():
+    from docx import Document
+
+    buf = io.BytesIO()
+    doc = Document()
+    doc.add_paragraph("Executive summary")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Metric"
+    table.cell(0, 1).text = "Value"
+    table.cell(1, 0).text = "Growth"
+    table.cell(1, 1).text = "12%"
+    doc.save(buf)
+
+    out = parse_docx(buf.getvalue())
+    assert "Executive summary" in out
+    assert "[Table: 1]" in out
+    assert "Growth | 12%" in out
+
+
+def test_pdf_empty_no_crash():
+    from pypdf import PdfWriter
+
+    buf = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.write(buf)
+
+    assert parse_pdf(buf.getvalue()) == ""
+
+
 def test_dispatch_by_extension():
     assert parse_file("notes.txt", b"hi") == "hi"
 
 
 def test_unsupported_type_raises():
     with pytest.raises(ValueError):
-        parse_file("doc.pdf", b"%PDF")
+        parse_file("slides.pptx", b"PK")

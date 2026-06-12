@@ -8,6 +8,23 @@ import requests
 from app.llm.errors import RateLimitError
 
 
+def _api_error(r: requests.Response) -> tuple[str, str, str]:
+    """Return provider error message/code/type from an OpenAI-style response."""
+    try:
+        payload = r.json()
+    except ValueError:
+        return (r.text or r.reason or "request failed", "", "")
+
+    err = payload.get("error", payload) if isinstance(payload, dict) else payload
+    if not isinstance(err, dict):
+        return (str(err), "", "")
+    return (
+        str(err.get("message") or r.reason or "request failed"),
+        str(err.get("code") or ""),
+        str(err.get("type") or ""),
+    )
+
+
 def chat(
     base_url: str,
     api_key: str,
@@ -39,7 +56,17 @@ def chat(
         json=body,
         timeout=120,
     )
-    if r.status_code == 429:
-        raise RateLimitError(f"{model} rate limit hit")
-    r.raise_for_status()
+    if not r.ok:
+        message, code, typ = _api_error(r)
+        # Groq can return HTTP 413 for TPM/request-size throttles while the
+        # JSON body reports rate_limit_exceeded. Treat those like 429 so the
+        # provider chain can fall through to Gemini/Qwen instead of surfacing a
+        # generic FastAPI 500.
+        if (
+            r.status_code in (429, 413)
+            or code == "rate_limit_exceeded"
+            or typ in {"rate_limit_error", "tokens"}
+        ):
+            raise RateLimitError(f"{model} rate/request limit hit: {message}")
+        r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"] or ""

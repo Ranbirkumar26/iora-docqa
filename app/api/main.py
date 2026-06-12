@@ -22,8 +22,11 @@ from app.config import (
 )
 from app.core.corpus import corpus_stats
 from app.core.ingest import dedupe_check, delete_file, ingest_one
+from app.core.jobs import create_job, list_jobs, update_job
 from app.core.memory import delete_memory, list_memories
+from app.core.orgs import AuthContext, create_personal_org, get_user_org
 from app.core.qa import ask
+from app.core.report import generate_report, get_report, list_reports
 from app.core.summarize import summarize
 from app.db.client import anon_client, service_client
 
@@ -43,8 +46,8 @@ class AuthIn(BaseModel):
     password: str
 
 
-def get_user_id(authorization: str = Header(None)) -> str:
-    """Verify Bearer JWT via Supabase, return the user's id."""
+def get_auth_context(authorization: str = Header(None)) -> AuthContext:
+    """Verify Bearer JWT and return user + active organisation context."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing bearer token")
     token = authorization.split(" ", 1)[1]
@@ -54,7 +57,7 @@ def get_user_id(authorization: str = Header(None)) -> str:
         raise HTTPException(401, "Invalid or expired token")
     if not res or not res.user:
         raise HTTPException(401, "Invalid or expired token")
-    return res.user.id
+    return get_user_org(res.user.id, getattr(res.user, "email", None))
 
 
 @api.post("/auth/signup")
@@ -64,9 +67,14 @@ def signup(body: AuthIn):
         res = service_client().auth.admin.create_user(
             {"email": body.email, "password": body.password, "email_confirm": True}
         )
+        org = create_personal_org(res.user.id, body.email)
     except Exception as e:
         raise HTTPException(400, f"Signup failed: {e}")
-    return {"user_id": res.user.id, "message": "Account created. Now log in."}
+    return {
+        "user_id": res.user.id,
+        "organization_id": org.organization_id,
+        "message": "Account created. Now log in.",
+    }
 
 
 @api.post("/auth/login")
@@ -83,11 +91,17 @@ def login(body: AuthIn):
 # ---------- files ----------
 @api.post("/upload")
 async def upload(
-    files: list[UploadFile] = File(...), user_id: str = Depends(get_user_id)
+    files: list[UploadFile] = File(...), ctx: AuthContext = Depends(get_auth_context)
 ):
     if len(files) > MAX_FILES_PER_BATCH:
         raise HTTPException(400, f"Max {MAX_FILES_PER_BATCH} files per batch")
 
+    job_id = create_job(
+        ctx.user_id,
+        ctx.organization_id,
+        "document_ingestion",
+        detail=f"{len(files)} file(s) queued for synchronous ingestion",
+    )
     uploaded, replaced, skipped = [], [], []
     max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
     allowed = ", ".join(sorted(e.lstrip(".") for e in SUPPORTED_EXTENSIONS))
@@ -108,34 +122,44 @@ async def upload(
             })
             continue
 
-        action, info = dedupe_check(user_id, uf.filename, data)
+        action, info = dedupe_check(ctx.organization_id, uf.filename, data)
         if action == "skip":
             skipped.append({"filename": uf.filename, "reason": info})
             continue
         if action == "replace":
-            delete_file(user_id, info)  # drop old version + its chunks
+            delete_file(ctx.organization_id, info)  # drop old version + its chunks
 
         try:
-            res = ingest_one(user_id, uf.filename, data)
+            res = ingest_one(ctx.user_id, ctx.organization_id, uf.filename, data)
             (replaced if action == "replace" else uploaded).append(res)
         except Exception as e:
             skipped.append({"filename": uf.filename, "reason": str(e)})
 
+    update_job(
+        job_id,
+        "completed",
+        metadata={
+            "uploaded": len(uploaded),
+            "replaced": len(replaced),
+            "skipped": len(skipped),
+        },
+    )
     return {
+        "job_id": job_id,
         "uploaded": uploaded,
         "replaced": replaced,
         "skipped": skipped,
-        **corpus_stats(user_id),
+        **corpus_stats(ctx.organization_id),
     }
 
 
 @api.get("/files")
-def list_files(user_id: str = Depends(get_user_id)):
+def list_files(ctx: AuthContext = Depends(get_auth_context)):
     sb = service_client()
     rows = (
         sb.table("files")
         .select("id, filename, file_type, char_count, upload_date, indexed")
-        .eq("user_id", user_id)
+        .eq("organization_id", ctx.organization_id)
         .order("upload_date", desc=True)
         .execute()
         .data
@@ -145,15 +169,20 @@ def list_files(user_id: str = Depends(get_user_id)):
 
 
 @api.delete("/files/{file_id}")
-def delete_file_endpoint(file_id: str, user_id: str = Depends(get_user_id)):
+def delete_file_endpoint(file_id: str, ctx: AuthContext = Depends(get_auth_context)):
     sb = service_client()
     exists = (
-        sb.table("files").select("id").eq("id", file_id).eq("user_id", user_id).execute().data
+        sb.table("files")
+        .select("id")
+        .eq("id", file_id)
+        .eq("organization_id", ctx.organization_id)
+        .execute()
+        .data
     )
     if not exists:
         raise HTTPException(404, "File not found")
-    delete_file(user_id, file_id)  # storage + row (+ chunks cascade)
-    return {"deleted": file_id, **corpus_stats(user_id)}
+    delete_file(ctx.organization_id, file_id)  # storage + row (+ chunks cascade)
+    return {"deleted": file_id, **corpus_stats(ctx.organization_id)}
 
 
 # ---------- query ----------
@@ -162,29 +191,56 @@ class AskIn(BaseModel):
 
 
 @api.post("/ask")
-def ask_endpoint(body: AskIn, user_id: str = Depends(get_user_id)):
-    return ask(user_id, body.question)
+def ask_endpoint(body: AskIn, ctx: AuthContext = Depends(get_auth_context)):
+    return ask(ctx.user_id, ctx.organization_id, body.question)
 
 
 @api.post("/summarize")
-def summarize_endpoint(user_id: str = Depends(get_user_id)):
-    return summarize(user_id)
+def summarize_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    return summarize(ctx.organization_id)
+
+
+@api.post("/report")
+def report_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    return generate_report(ctx.user_id, ctx.organization_id)
+
+
+@api.get("/reports")
+def reports_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    return {"reports": list_reports(ctx.organization_id)}
+
+
+@api.get("/reports/{report_id}")
+def report_detail_endpoint(report_id: str, ctx: AuthContext = Depends(get_auth_context)):
+    report = get_report(ctx.organization_id, report_id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+    return report
+
+
+@api.get("/jobs")
+def jobs_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    return {"jobs": list_jobs(ctx.organization_id)}
 
 
 @api.get("/status")
-def status(user_id: str = Depends(get_user_id)):
-    return corpus_stats(user_id)
+def status(ctx: AuthContext = Depends(get_auth_context)):
+    return {
+        **corpus_stats(ctx.organization_id),
+        "organization_id": ctx.organization_id,
+        "organization_name": ctx.organization_name,
+    }
 
 
 # ---------- memory ----------
 @api.get("/memories")
-def list_memories_endpoint(user_id: str = Depends(get_user_id)):
-    return {"memories": list_memories(user_id)}
+def list_memories_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    return {"memories": list_memories(ctx.user_id)}
 
 
 @api.delete("/memories/{mem_id}")
-def delete_memory_endpoint(mem_id: str, user_id: str = Depends(get_user_id)):
-    delete_memory(user_id, mem_id)
+def delete_memory_endpoint(mem_id: str, ctx: AuthContext = Depends(get_auth_context)):
+    delete_memory(ctx.user_id, mem_id)
     return {"deleted": mem_id}
 
 

@@ -6,13 +6,13 @@ from app.llm.provider import complete
 SYSTEM = "You are a document assistant that writes clear, faithful summaries."
 
 
-def summarize(user_id: str) -> dict:
-    stats = corpus_stats(user_id)
+def summarize(organization_id: str) -> dict:
+    stats = corpus_stats(organization_id)
     if stats["total_files"] == 0:
         return {"summary": "No documents uploaded yet.", "mode": "none"}
 
     if stats["mode"] == "direct":
-        context = fetch_all_texts(user_id)
+        context = fetch_all_texts(organization_id)
         user_msg = (
             f"Documents:\n\n{context}\n\n"
             "First write a separate summary for each file (label it with the "
@@ -24,7 +24,11 @@ def summarize(user_id: str) -> dict:
     # RAG mode: summarize each file from its chunks, then combine (map-reduce)
     sb = service_client()
     files = (
-        sb.table("files").select("id, filename").eq("user_id", user_id).execute().data
+        sb.table("files")
+        .select("id, filename")
+        .eq("organization_id", organization_id)
+        .execute()
+        .data
         or []
     )
     per_file = []

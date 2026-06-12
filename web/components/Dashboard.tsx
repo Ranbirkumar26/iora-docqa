@@ -10,8 +10,9 @@ import UploadZone from "@/components/UploadZone";
 import FileList from "@/components/FileList";
 import AskPanel from "@/components/AskPanel";
 import SummarizePanel from "@/components/SummarizePanel";
+import ReportPanel from "@/components/ReportPanel";
 
-type Tab = "ask" | "summarize" | "files";
+type Tab = "ask" | "summarize" | "report" | "files";
 
 function fmtTokens(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -149,6 +150,7 @@ export default function Dashboard({
           <div className="flex items-center gap-2">
             {status && (
               <span className="hidden text-xs text-faint sm:block">
+                {status.organization_name ? `${status.organization_name} · ` : ""}
                 {status.total_files} file{status.total_files === 1 ? "" : "s"} ·{" "}
                 {fmtTokens(status.total_tokens)} tokens
               </span>
@@ -170,11 +172,12 @@ export default function Dashboard({
           {/* main column */}
           <main className="min-w-0">
             {/* tab bar; Files tab only exists on mobile */}
-            <nav className="mb-5 grid grid-cols-3 rounded-xl bg-inset p-1 lg:max-w-xs lg:grid-cols-2">
+            <nav className="mb-5 grid grid-cols-4 rounded-xl bg-inset p-1 lg:max-w-md lg:grid-cols-3">
               {(
                 [
                   ["ask", "Ask"],
                   ["summarize", "Summarize"],
+                  ["report", "Report"],
                   ["files", `Files (${files.length})`],
                 ] as [Tab, string][]
               ).map(([key, label]) => (
@@ -205,6 +208,13 @@ export default function Dashboard({
               )}
               {tab === "summarize" && (
                 <SummarizePanel
+                  token={token}
+                  hasFiles={hasFiles}
+                  onAuthExpired={onAuthExpired}
+                />
+              )}
+              {tab === "report" && (
+                <ReportPanel
                   token={token}
                   hasFiles={hasFiles}
                   onAuthExpired={onAuthExpired}
