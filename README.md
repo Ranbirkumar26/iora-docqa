@@ -18,14 +18,39 @@ Responsive web app: works on desktop and mobile browsers, light/dark theme.
 
 ## How it answers
 
-Three query paths, picked automatically per question:
+Query paths, picked automatically per question:
 
 - **Direct** (corpus < ~150k tokens): all text stuffed into the model context. Max accuracy.
 - **RAG** (larger corpus): chunk -> embed (Gemini) -> pgvector search -> answer from top passages.
 - **Structured** (quantitative questions over csv/xlsx): the model writes SQL, DuckDB executes
   it on the real table, the model phrases the exact result. No LLM arithmetic.
+- **Memory**: facts you ask it to remember are answered from saved memory (see below).
 
 Answers cite source filenames; the structured path also exposes the SQL it ran.
+
+## Memory
+
+Type `remember ...` (also `note that ...`, `don't forget ...`, `my name is ...`) and the
+fact is saved to your account. Saved facts are injected into later questions, so
+"what is my name?" is answered from memory (works even with no documents). Manage them in
+the sidebar Memory list (delete any). Stored in a Supabase `memories` table (RLS-isolated,
+capped at 30 facts). Capture is heuristic today, swappable to an LLM intent check later.
+
+## LLM fallback chain
+
+`LLM_CHAIN` is an ordered, comma-separated list (default `groq,gemini,qwen`). The first is
+the everyday primary; each next is tried when the previous is rate-limited. Providers
+without a key are skipped, so it works incrementally. If all are exhausted the API returns
+a clean 429. All three are free tiers:
+
+| Provider | Model | Endpoint |
+|---|---|---|
+| Groq | `llama-3.3-70b-versatile` | Groq Cloud |
+| Gemini | `gemini-2.5-flash-lite` | Google AI Studio |
+| Qwen | `qwen/qwen3-coder:free` | OpenRouter |
+
+Embeddings are always Gemini (`gemini-embedding-001`, 768d) so stored vectors stay consistent.
+Reorder anytime with the `LLM_CHAIN` env var, no code change.
 
 ## Stack
 
@@ -34,14 +59,16 @@ Answers cite source filenames; the structured path also exposes the SQL it ran.
 | Frontend | Next.js 15 + React 19 + Tailwind v4, static export, light/dark theme |
 | Backend | FastAPI (serves the SPA at `/` and the API under `/api`) |
 | Auth, storage, DB | Supabase (Postgres + pgvector + Storage + Auth, RLS) |
-| LLM + embeddings | Gemini `gemini-2.5-flash-lite` + `gemini-embedding-001` (768d) |
+| LLM | Fallback chain: Groq -> Gemini -> Qwen (all free tiers) |
+| Embeddings | Gemini `gemini-embedding-001` (768d) |
 | Tabular queries | DuckDB (SELECT-only, external access disabled) |
 | Hosting | Railway, single Docker container |
 
 ## Setup
 
-1. Copy `.env.template` to `.env` and fill: `GEMINI_API_KEY`, `SUPABASE_URL`,
-   `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`.
+1. Copy `.env.template` to `.env` and fill `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+   `SUPABASE_SERVICE_KEY`, plus at least one LLM key (`GROQ_API_KEY`, `GEMINI_API_KEY`,
+   `QWEN_API_KEY`). Gemini is required for embeddings. Missing LLM keys are skipped in the chain.
 2. Apply `app/db/schema.sql` in the Supabase SQL editor; create a private storage
    bucket named `user-documents`.
 3. Backend deps: `python -m venv .venv && .venv/bin/pip install -r requirements.txt`
@@ -78,8 +105,8 @@ A legacy Streamlit UI remains in `frontend/app.py` for quick local poking:
 Single container: Streamlit-free, FastAPI serves SPA + API on `$PORT`.
 
 - **Railway** (current): `railway up` from the repo root (project already linked).
-  Set the 4 env vars as service variables.
-- **Render**: push to GitHub, New -> Blueprint (reads `render.yaml`), set the 4 secrets.
+  Set the secrets as service variables (Supabase + LLM keys).
+- **Render**: push to GitHub, New -> Blueprint (reads `render.yaml`), set the secrets.
 - **Local Docker**:
   ```bash
   docker build -t docqa .
@@ -94,23 +121,26 @@ app/
   parsers/parse.py   txt/csv/xlsx -> text
   rag/chunk.py       structure-aware chunking (rows for csv, per-sheet for xlsx)
   rag/embed.py       Gemini/Voyage embeddings (cached query embeds)
-  llm/               gemini.py, claude.py, provider.py (env-switchable)
+  llm/               provider.py (fallback chain), gemini.py, groq.py, qwen.py,
+                     openai_compat.py (shared client), claude.py, errors.py
   core/
     ingest.py        upload pipeline: parse -> store -> hash dedup -> chunk -> embed
     corpus.py        corpus stats + mode detection + full-text fetch
-    qa.py            ask(): direct / rag / structured routing
+    qa.py            ask(): memory / direct / rag / structured routing
     structured.py    DuckDB SQL path for quantitative questions
     summarize.py     per-file + overall summaries (map-reduce in RAG mode)
+    memory.py        per-user remember/recall (capture, store, inject)
   db/                supabase clients, schema.sql
   api/main.py        FastAPI: /api routes + static SPA mount
 web/                 Next.js app (components, theme tokens, iORA branding)
 frontend/app.py      legacy Streamlit UI (local dev only)
-tests/               parser, chunking, structured-SQL safety tests
+tests/               parser, chunking, structured-SQL, fallback, memory tests
 ```
 
 ## Notes
 
 - Same filename re-uploaded with new content replaces the old version; identical
   content is skipped (sha256 dedup).
-- Gemini free tier: 20 requests/min; the API returns a clean 429 when exceeded.
+- Free LLM tiers are rate-limited (Groq/Gemini/Qwen); the chain falls through on 429
+  and only returns 429 to the client when every configured provider is exhausted.
 - Railway free tier sleeps when idle; first request after a pause cold-starts.
