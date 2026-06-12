@@ -18,7 +18,7 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 # Ordered, comma-separated provider names. First is the everyday primary; each
 # next is tried when the previous is rate-limited. Providers without a key set
 # are skipped, so the chain works incrementally as keys are added.
-LLM_CHAIN = os.getenv("LLM_CHAIN", "qwen,groq,gemini")  # qwen | groq | gemini | claude
+LLM_CHAIN = os.getenv("LLM_CHAIN", "groq,gemini,qwen")  # qwen | groq | gemini | claude
 EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "gemini")  # gemini | voyage
 
 # --- models ---
