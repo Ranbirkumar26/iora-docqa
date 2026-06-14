@@ -122,7 +122,7 @@ export type UploadResponse = Status & {
 
 export type AskResponse = {
   answer: string;
-  mode: "direct" | "rag" | "structured" | "memory" | "none";
+  mode: "direct" | "rag" | "structured" | "decision" | "memory" | "none";
   sources: string[];
   sql?: string;
 };

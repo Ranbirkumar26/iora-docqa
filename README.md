@@ -35,6 +35,8 @@ Query paths, picked automatically per question:
 - **RAG** (larger corpus): chunk -> embed (Gemini) -> pgvector search -> answer from top passages.
 - **Structured** (quantitative questions over csv/xlsx): the model writes SQL, DuckDB executes
   it on the real table, the model phrases the exact result. No LLM arithmetic.
+- **Decision support** (recommendations / next actions): computed table signals plus document
+  evidence are turned into grounded recommendations, risks, caveats, and next actions.
 - **Report**: deterministic table stats plus qualitative extraction are synthesized into an
   executive report with findings, risks, opportunities, and recommendations.
   Generated reports are saved to the organisation's report history.
@@ -144,6 +146,7 @@ app/
     ingest.py        upload pipeline: parse -> store -> hash dedup -> chunk -> embed
     corpus.py        corpus stats + mode detection + full-text fetch
     qa.py            ask(): memory / direct / rag / structured routing
+    decision.py      grounded recommendations, risks, caveats, next actions
     structured.py    DuckDB SQL path for quantitative questions
     report.py        deterministic stats + qualitative synthesis -> report
     jobs.py          sync job records now, ready for async workers later

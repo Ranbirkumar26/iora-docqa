@@ -16,6 +16,7 @@ const MODE_TONE = {
   direct: "indigo",
   rag: "emerald",
   structured: "amber",
+  decision: "emerald",
   memory: "indigo",
   none: "zinc",
 } as const;
@@ -24,6 +25,7 @@ const MODE_HINT = {
   direct: "answered from the full text of your documents",
   rag: "answered from the most relevant passages",
   structured: "computed exactly with SQL over your tables",
+  decision: "recommendations grounded in your uploaded evidence",
   memory: "answered from your saved memory",
   none: "",
 } as const;
@@ -33,6 +35,7 @@ const SUGGESTIONS = [
   "Which region generated the most revenue?",
   "What is the average score in the survey data?",
   "List any complaints or issues mentioned",
+  "What should we prioritize next?",
 ];
 
 function CopyButton({ text }: { text: string }) {

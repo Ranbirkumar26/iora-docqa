@@ -2,6 +2,7 @@
 import re
 
 from app.core.corpus import corpus_stats, fetch_all_texts
+from app.core.decision import answer_decision, looks_decision_support
 from app.core.memory import add_memory, detect_remember, memory_block
 from app.core.structured import answer_structured, looks_quantitative
 from app.db.client import service_client
@@ -68,6 +69,11 @@ def ask(
         s = answer_structured(scope_id, question, use_org)
         if s is not None:
             return s
+
+    # 4) recommendations / prioritization -> grounded decision-support mode.
+    # Keep this after structured Q&A so factual counts stay computed by DuckDB.
+    if looks_decision_support(question):
+        return answer_decision(user_id, organization_id, question, stats, use_org)
 
     if stats["mode"] == "direct":
         context = fetch_all_texts(scope_id, use_org)
