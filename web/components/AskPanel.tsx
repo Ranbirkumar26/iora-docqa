@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 import { AskResponse, call } from "@/lib/api";
+import { useSessionState } from "@/lib/session-state";
 import { Alert, Badge, Card, PrimaryButton, Spinner } from "@/components/ui";
 import Markdown from "@/components/Markdown";
 import { IconChat, IconCheck, IconCopy, IconX } from "@/components/icons";
 
 type Entry = { q: string } & AskResponse;
+type AskPanelState = { question: string; history: Entry[] };
+
+const ASK_STATE_KEY = "docqa:ask-panel";
 
 const MODE_TONE = {
   direct: "indigo",
@@ -69,10 +73,20 @@ export default function AskPanel({
   onAuthExpired: () => void;
   onAnswered?: () => void;
 }) {
-  const [question, setQuestion] = useState("");
+  const [panelState, setPanelState] = useSessionState<AskPanelState>(
+    ASK_STATE_KEY,
+    { question: "", history: [] },
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<Entry[]>([]);
+  const { question, history } = panelState;
+  const setQuestion = (next: string) =>
+    setPanelState((current) => ({ ...current, question: next }));
+  const setHistory = (next: Entry[] | ((current: Entry[]) => Entry[])) =>
+    setPanelState((current) => ({
+      ...current,
+      history: typeof next === "function" ? next(current.history) : next,
+    }));
 
   async function ask(e?: React.FormEvent, preset?: string) {
     e?.preventDefault();
@@ -89,8 +103,11 @@ export default function AskPanel({
     if (r.status === 401) return onAuthExpired();
     if (r.error || !r.data) return setError(r.error ?? "Something went wrong");
 
-    setHistory((h) => [{ q, ...r.data! }, ...h]);
-    setQuestion("");
+    setPanelState((current) => ({
+      ...current,
+      question: "",
+      history: [{ q, ...r.data! }, ...current.history],
+    }));
     if (r.data.mode === "memory") onAnswered?.(); // refresh sidebar memory list
   }
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { call, JobRow, ReportResponse, ReportRow } from "@/lib/api";
+import { useSessionState } from "@/lib/session-state";
 import { Alert, Badge, Card, GhostButton, PrimaryButton, Spinner } from "@/components/ui";
 import Markdown from "@/components/Markdown";
 import { IconClipboard, IconDownload } from "@/components/icons";
@@ -16,6 +17,8 @@ function downloadMarkdown(text: string) {
   URL.revokeObjectURL(url);
 }
 
+const REPORT_STATE_KEY = "docqa:report-panel";
+
 export default function ReportPanel({
   token,
   hasFiles,
@@ -27,7 +30,10 @@ export default function ReportPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ReportResponse | null>(null);
+  const [result, setResult] = useSessionState<ReportResponse | null>(
+    REPORT_STATE_KEY,
+    null,
+  );
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [jobs, setJobs] = useState<JobRow[]>([]);
 

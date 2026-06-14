@@ -5,6 +5,7 @@ import AuthView from "@/components/AuthView";
 import Dashboard from "@/components/Dashboard";
 import { Spinner } from "@/components/ui";
 import { AuthSession, call, configureAuthRefresh } from "@/lib/api";
+import { clearDocqaSessionState } from "@/lib/session-state";
 
 const SESSION_KEY = "docqa_session";
 const LEGACY_TOKEN_KEY = "docqa_token";
@@ -46,6 +47,7 @@ export default function Home() {
     } else {
       localStorage.removeItem(SESSION_KEY);
       localStorage.removeItem(LEGACY_TOKEN_KEY);
+      clearDocqaSessionState();
     }
     setSession(next);
   }, []);

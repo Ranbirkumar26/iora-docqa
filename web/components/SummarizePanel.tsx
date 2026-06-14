@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { call, SummarizeResponse } from "@/lib/api";
+import { useSessionState } from "@/lib/session-state";
 import { Alert, Badge, Card, GhostButton, PrimaryButton, Spinner } from "@/components/ui";
 import Markdown from "@/components/Markdown";
 import { IconClipboard, IconDownload } from "@/components/icons";
@@ -16,6 +17,8 @@ function downloadMarkdown(text: string) {
   URL.revokeObjectURL(url);
 }
 
+const SUMMARY_STATE_KEY = "docqa:summarize-panel";
+
 export default function SummarizePanel({
   token,
   hasFiles,
@@ -27,7 +30,10 @@ export default function SummarizePanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SummarizeResponse | null>(null);
+  const [result, setResult] = useSessionState<SummarizeResponse | null>(
+    SUMMARY_STATE_KEY,
+    null,
+  );
 
   async function run() {
     setBusy(true);
