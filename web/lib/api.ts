@@ -3,6 +3,14 @@
 
 const BASE = "/api";
 
+export type AuthSession = {
+  access_token: string;
+  refresh_token: string | null;
+  expires_at?: number | null;
+  expires_in?: number | null;
+  user_id?: string | null;
+};
+
 export type ApiResult<T> = {
   data: T | null;
   error: string | null;
@@ -15,19 +23,29 @@ type CallOpts = {
   form?: FormData;
 };
 
+type AuthRefreshHandler = (failedToken: string) => Promise<string | null>;
+
+let authRefreshHandler: AuthRefreshHandler | null = null;
+
+export function configureAuthRefresh(handler: AuthRefreshHandler | null) {
+  authRefreshHandler = handler;
+}
+
 function asMessage(detail: unknown, status: number): string {
   if (typeof detail === "string") return detail;
   if (detail) return JSON.stringify(detail);
   return `Server error (HTTP ${status})`;
 }
 
-export async function call<T>(
+async function send<T>(
   method: string,
   path: string,
-  opts: CallOpts = {},
+  opts: CallOpts,
+  tokenOverride?: string | null,
 ): Promise<ApiResult<T>> {
   const headers: Record<string, string> = {};
-  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  const authToken = tokenOverride ?? opts.token;
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
   let body: BodyInit | undefined;
   if (opts.json !== undefined) {
@@ -60,6 +78,19 @@ export async function call<T>(
     return { data: null, error: asMessage(detail, res.status), status: res.status };
   }
   return { data: payload as T, error: null, status: res.status };
+}
+
+export async function call<T>(
+  method: string,
+  path: string,
+  opts: CallOpts = {},
+): Promise<ApiResult<T>> {
+  const first = await send<T>(method, path, opts);
+  if (first.status === 401 && opts.token && authRefreshHandler) {
+    const freshToken = await authRefreshHandler(opts.token);
+    if (freshToken) return send<T>(method, path, opts, freshToken);
+  }
+  return first;
 }
 
 // ---- API types ----

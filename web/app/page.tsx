@@ -1,31 +1,84 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AuthView from "@/components/AuthView";
 import Dashboard from "@/components/Dashboard";
 import { Spinner } from "@/components/ui";
+import { AuthSession, call, configureAuthRefresh } from "@/lib/api";
 
-const TOKEN_KEY = "docqa_token";
+const SESSION_KEY = "docqa_session";
+const LEGACY_TOKEN_KEY = "docqa_token";
+
+function readStoredSession(): AuthSession | null {
+  const raw = localStorage.getItem(SESSION_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as AuthSession;
+      if (parsed?.access_token) return parsed;
+    } catch {
+      localStorage.removeItem(SESSION_KEY);
+    }
+  }
+
+  const legacyToken = localStorage.getItem(LEGACY_TOKEN_KEY);
+  return legacyToken ? { access_token: legacyToken, refresh_token: null } : null;
+}
 
 export default function Home() {
-  const [token, setToken] = useState<string | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [ready, setReady] = useState(false);
   const [expiredMsg, setExpiredMsg] = useState(false);
+  const sessionRef = useRef<AuthSession | null>(null);
+  const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
   useEffect(() => {
-    setToken(localStorage.getItem(TOKEN_KEY));
+    const stored = readStoredSession();
+    sessionRef.current = stored;
+    setSession(stored);
     setReady(true);
   }, []);
 
-  const save = useCallback((t: string | null) => {
-    if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
-    setToken(t);
+  const save = useCallback((next: AuthSession | null) => {
+    sessionRef.current = next;
+    if (next?.access_token) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+      localStorage.removeItem(LEGACY_TOKEN_KEY);
+    } else {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(LEGACY_TOKEN_KEY);
+    }
+    setSession(next);
   }, []);
 
   const authExpired = useCallback(() => {
     save(null);
     setExpiredMsg(true);
+  }, [save]);
+
+  useEffect(() => {
+    configureAuthRefresh(async (failedToken) => {
+      const current = sessionRef.current;
+      if (!current?.refresh_token) return null;
+      if (current.access_token !== failedToken) return current.access_token;
+
+      if (!refreshPromiseRef.current) {
+        refreshPromiseRef.current = (async () => {
+          const r = await call<AuthSession>("POST", "/auth/refresh", {
+            json: { refresh_token: current.refresh_token },
+          });
+          if (r.data?.access_token) {
+            save(r.data);
+            return r.data.access_token;
+          }
+          return null;
+        })().finally(() => {
+          refreshPromiseRef.current = null;
+        });
+      }
+      return refreshPromiseRef.current;
+    });
+
+    return () => configureAuthRefresh(null);
   }, [save]);
 
   if (!ready) {
@@ -36,7 +89,7 @@ export default function Home() {
     );
   }
 
-  if (!token) {
+  if (!session?.access_token) {
     return (
       <>
         {expiredMsg && (
@@ -45,9 +98,9 @@ export default function Home() {
           </p>
         )}
         <AuthView
-          onToken={(t) => {
+          onSession={(next) => {
             setExpiredMsg(false);
-            save(t);
+            save(next);
           }}
         />
       </>
@@ -55,6 +108,13 @@ export default function Home() {
   }
 
   return (
-    <Dashboard token={token} onLogout={() => save(null)} onAuthExpired={authExpired} />
+    <Dashboard
+      token={session.access_token}
+      onLogout={() => {
+        setExpiredMsg(false);
+        save(null);
+      }}
+      onAuthExpired={authExpired}
+    />
   );
 }

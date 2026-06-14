@@ -17,6 +17,11 @@ def anon_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 
+def fresh_anon_client() -> Client:
+    """Return an auth client with no shared in-memory session state."""
+    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+
 @lru_cache
 def service_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)

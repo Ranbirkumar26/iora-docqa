@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { call } from "@/lib/api";
+import { AuthSession, call } from "@/lib/api";
 import { Alert, Card, Field, PrimaryButton } from "@/components/ui";
 import { Wordmark } from "@/components/Brand";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -9,9 +9,9 @@ import ThemeToggle from "@/components/ThemeToggle";
 type Mode = "login" | "signup";
 
 export default function AuthView({
-  onToken,
+  onSession,
 }: {
-  onToken: (token: string) => void;
+  onSession: (session: AuthSession) => void;
 }) {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -36,12 +36,12 @@ export default function AuthView({
       // fall through to login with same credentials
     }
 
-    const r = await call<{ access_token: string }>("POST", "/auth/login", {
+    const r = await call<AuthSession>("POST", "/auth/login", {
       json: { email, password },
     });
     setBusy(false);
     if (r.error || !r.data) return setError(r.error ?? "Login failed");
-    onToken(r.data.access_token);
+    onSession(r.data);
   }
 
   return (

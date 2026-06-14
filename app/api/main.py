@@ -1,6 +1,7 @@
 """FastAPI app. API under /api; serves the built web SPA (web/out) at /."""
 from pathlib import Path
 
+import httpx
 from fastapi import (
     APIRouter,
     Depends,
@@ -28,7 +29,7 @@ from app.core.orgs import AuthContext, create_personal_org, get_user_org
 from app.core.qa import ask
 from app.core.report import generate_report, get_report, list_reports
 from app.core.summarize import summarize
-from app.db.client import anon_client, service_client
+from app.db.client import anon_client, fresh_anon_client, service_client
 
 app = FastAPI(title="DocQA")
 api = APIRouter(prefix="/api")
@@ -50,6 +51,24 @@ class AuthIn(BaseModel):
     password: str
 
 
+class RefreshIn(BaseModel):
+    refresh_token: str
+
+
+def _session_payload(res) -> dict:
+    session = getattr(res, "session", None)
+    user = getattr(res, "user", None)
+    if not session or not getattr(session, "access_token", None):
+        raise HTTPException(401, "Invalid credentials")
+    return {
+        "access_token": session.access_token,
+        "refresh_token": getattr(session, "refresh_token", None),
+        "expires_at": getattr(session, "expires_at", None),
+        "expires_in": getattr(session, "expires_in", None),
+        "user_id": getattr(user, "id", None),
+    }
+
+
 def get_auth_context(authorization: str = Header(None)) -> AuthContext:
     """Verify Bearer JWT and return user + active organisation context."""
     if not authorization or not authorization.startswith("Bearer "):
@@ -57,6 +76,8 @@ def get_auth_context(authorization: str = Header(None)) -> AuthContext:
     token = authorization.split(" ", 1)[1]
     try:
         res = anon_client().auth.get_user(token)
+    except httpx.TransportError:
+        raise HTTPException(503, "Auth service temporarily unavailable")
     except Exception:
         raise HTTPException(401, "Invalid or expired token")
     if not res or not res.user:
@@ -84,12 +105,23 @@ def signup(body: AuthIn):
 @api.post("/auth/login")
 def login(body: AuthIn):
     try:
-        res = anon_client().auth.sign_in_with_password(
+        res = fresh_anon_client().auth.sign_in_with_password(
             {"email": body.email, "password": body.password}
         )
     except Exception:
         raise HTTPException(401, "Invalid credentials")
-    return {"access_token": res.session.access_token, "user_id": res.user.id}
+    return _session_payload(res)
+
+
+@api.post("/auth/refresh")
+def refresh(body: RefreshIn):
+    try:
+        res = fresh_anon_client().auth.refresh_session(body.refresh_token)
+    except httpx.TransportError:
+        raise HTTPException(503, "Auth service temporarily unavailable")
+    except Exception:
+        raise HTTPException(401, "Session expired. Please log in again.")
+    return _session_payload(res)
 
 
 # ---------- files ----------
