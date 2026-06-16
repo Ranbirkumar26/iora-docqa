@@ -8,6 +8,7 @@ import uuid
 
 from app.config import STORAGE_BUCKET
 from app.db.client import service_client
+from app.core.outputs import save_extraction_output, save_output
 from app.parsers.parse import parse_file
 from app.rag.chunk import chunk_for_type
 from app.rag.embed import embed_documents
@@ -138,5 +139,32 @@ def ingest_one(
 
     # 5. mark indexed
     sb.table("files").update({"indexed": True}).eq("id", file_id).execute()
+
+    # 6. keep per-document generated artifacts separate from collective analysis.
+    # These are non-critical for upload success; older deployments may not have
+    # the generated_outputs table yet, so persistence degrades gracefully.
+    try:
+        save_output(
+            user_id,
+            organization_id,
+            "transcript",
+            f"Transcript: {filename}",
+            text or "No extractable text was found in this document.",
+            use_org,
+            file_id=file_id,
+            format="text",
+            sources=[filename],
+            metadata={"char_count": char_count},
+        )
+        save_extraction_output(
+            user_id,
+            organization_id,
+            file_id,
+            filename,
+            text,
+            use_org,
+        )
+    except Exception:
+        pass
 
     return {"file_id": file_id, "filename": filename, "char_count": char_count}

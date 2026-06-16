@@ -78,11 +78,10 @@ def _retrieved_context(
     )
     rpc_args = {
         "p_user_id": user_id,
+        "p_organization_id": organization_id if use_org else None,
         "query_embedding": str(emb),
         "match_count": DECISION_TOP_K,
     }
-    if use_org:
-        rpc_args["p_organization_id"] = organization_id
 
     rows = (
         service_client()

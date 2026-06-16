@@ -16,6 +16,7 @@ _TRIGGERS = [
     r"^note(?:\s+that)?\s+(.+)",
     r"^don'?t\s+forget(?:\s+that)?\s+(.+)",
     r"^keep in mind(?:\s+that)?\s+(.+)",
+    r"^(?:add|save|store)\s+(.+?)\s+to\s+(?:my\s+)?(?:permanent\s+)?memory$",
 ]
 # identity statements worth keeping even without "remember"
 _IDENTITY = r"^(my name is\s+.+|i am\s+.+|i'?m\s+.+|i work\s+.+|i prefer\s+.+)"

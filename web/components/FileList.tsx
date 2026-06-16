@@ -20,11 +20,13 @@ function fmtChars(n: number) {
 export default function FileList({
   token,
   files,
+  canDelete = true,
   onChanged,
   onAuthExpired,
 }: {
   token: string;
   files: FileRow[];
+  canDelete?: boolean;
   onChanged: () => void;
   onAuthExpired: () => void;
 }) {
@@ -65,7 +67,7 @@ export default function FileList({
               {!f.indexed && " · indexing..."}
             </p>
           </div>
-          {confirming === f.id ? (
+          {canDelete && confirming === f.id ? (
             <div className="flex shrink-0 items-center gap-1">
               <button
                 onClick={() => remove(f.id)}
@@ -81,7 +83,7 @@ export default function FileList({
                 Keep
               </button>
             </div>
-          ) : (
+          ) : canDelete ? (
             <button
               onClick={() => setConfirming(f.id)}
               className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-inset hover:text-red-400"
@@ -89,7 +91,7 @@ export default function FileList({
             >
               <IconTrash className="h-4 w-4" />
             </button>
-          )}
+          ) : null}
         </li>
       ))}
     </ul>

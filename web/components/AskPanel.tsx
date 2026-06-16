@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { AskResponse, call } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { AskResponse, call, ConversationMessage } from "@/lib/api";
 import { useSessionState } from "@/lib/session-state";
 import { Alert, Badge, Card, PrimaryButton, Spinner } from "@/components/ui";
 import Markdown from "@/components/Markdown";
-import { IconChat, IconCheck, IconCopy, IconX } from "@/components/icons";
+import { IconChat, IconCheck, IconCopy } from "@/components/icons";
 
-type Entry = { q: string } & AskResponse;
+type Entry = { id?: string; q: string; created_at?: string } & AskResponse;
 type AskPanelState = { question: string; history: Entry[] };
 
 const ASK_STATE_KEY = "docqa:ask-panel";
@@ -37,6 +37,31 @@ const SUGGESTIONS = [
   "List any complaints or issues mentioned",
   "What should we prioritize next?",
 ];
+
+function toEntries(messages: ConversationMessage[]): Entry[] {
+  const entries: Entry[] = [];
+  let pendingQuestion: ConversationMessage | null = null;
+  messages.forEach((msg) => {
+    if (msg.role === "user") {
+      pendingQuestion = msg;
+      return;
+    }
+    if (msg.role !== "assistant" || !pendingQuestion) return;
+    const sql =
+      typeof msg.metadata?.sql === "string" ? msg.metadata.sql : undefined;
+    entries.push({
+      id: msg.id,
+      q: pendingQuestion.content,
+      answer: msg.content,
+      mode: (msg.mode as AskResponse["mode"]) ?? "none",
+      sources: msg.sources ?? [],
+      sql,
+      created_at: msg.created_at,
+    });
+    pendingQuestion = null;
+  });
+  return entries.reverse();
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -68,11 +93,13 @@ function CopyButton({ text }: { text: string }) {
 export default function AskPanel({
   token,
   hasFiles,
+  readOnly = false,
   onAuthExpired,
   onAnswered,
 }: {
   token: string;
   hasFiles: boolean;
+  readOnly?: boolean;
   onAuthExpired: () => void;
   onAnswered?: () => void;
 }) {
@@ -85,11 +112,28 @@ export default function AskPanel({
   const { question, history } = panelState;
   const setQuestion = (next: string) =>
     setPanelState((current) => ({ ...current, question: next }));
-  const setHistory = (next: Entry[] | ((current: Entry[]) => Entry[])) =>
-    setPanelState((current) => ({
-      ...current,
-      history: typeof next === "function" ? next(current.history) : next,
-    }));
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadConversation() {
+      const r = await call<{ messages: ConversationMessage[] }>("GET", "/conversation", {
+        token,
+      });
+      if (cancelled) return;
+      if (r.status === 401) return onAuthExpired();
+      const messages = r.data?.messages ?? [];
+      if (messages.length) {
+        setPanelState((current) => ({
+          ...current,
+          history: toEntries(messages),
+        }));
+      }
+    }
+    loadConversation();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, onAuthExpired, setPanelState]);
 
   async function ask(e?: React.FormEvent, preset?: string) {
     e?.preventDefault();
@@ -182,21 +226,15 @@ export default function AskPanel({
       {history.length > 0 && (
         <div className="flex items-center justify-between">
           <p className="text-xs font-medium uppercase tracking-wide text-faint">
-            {history.length} answer{history.length === 1 ? "" : "s"} this
-            session
+            {history.length} answer{history.length === 1 ? "" : "s"}{" "}
+            {readOnly ? "in this view" : "saved"}
           </p>
-          <button
-            onClick={() => setHistory([])}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-faint transition hover:bg-inset hover:text-fg"
-          >
-            <IconX className="h-3 w-3" /> Clear
-          </button>
         </div>
       )}
 
       <div className="space-y-4">
         {history.map((entry, i) => (
-          <Card key={history.length - i} className="overflow-hidden">
+          <Card key={entry.id ?? history.length - i} className="overflow-hidden">
             <div className="flex items-center justify-between gap-2 border-b border-edge bg-inset/50 px-4 py-3">
               <p className="min-w-0 flex-1 text-sm font-medium text-fg">
                 {entry.q}

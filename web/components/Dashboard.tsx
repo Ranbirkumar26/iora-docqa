@@ -1,10 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { call, FileRow, Memory, Status } from "@/lib/api";
-import { Badge, Card, GhostButton } from "@/components/ui";
+import {
+  call,
+  ConversationExport,
+  FileRow,
+  GeneratedOutput,
+  MemberRow,
+  Memory,
+  Status,
+} from "@/lib/api";
+import { Alert, Badge, Card, GhostButton } from "@/components/ui";
 import { Wordmark } from "@/components/Brand";
-import { IconTrash } from "@/components/icons";
+import { IconDownload, IconTrash } from "@/components/icons";
 import ThemeToggle from "@/components/ThemeToggle";
 import UploadZone from "@/components/UploadZone";
 import FileList from "@/components/FileList";
@@ -20,6 +28,22 @@ function fmtTokens(n: number) {
   return `${n}`;
 }
 
+const ROLE_TONE = {
+  user: "zinc",
+  author: "amber",
+  admin: "emerald",
+} as const;
+
+function downloadText(filename: string, mimeType: string, content: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function Dashboard({
   token,
   onLogout,
@@ -33,22 +57,105 @@ export default function Dashboard({
   const [status, setStatus] = useState<Status | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [extractions, setExtractions] = useState<GeneratedOutput[]>([]);
+  const [attachExport, setAttachExport] = useState(false);
+  const [exportBusy, setExportBusy] = useState<"markdown" | "txt" | null>(null);
+  const [exportMessage, setExportMessage] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
+  const [accessMessage, setAccessMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [s, f, m] = await Promise.all([
+    const [s, f, m, o] = await Promise.all([
       call<Status>("GET", "/status", { token }),
       call<{ files: FileRow[] }>("GET", "/files", { token }),
       call<{ memories: Memory[] }>("GET", "/memories", { token }),
+      call<{ outputs: GeneratedOutput[] }>("GET", "/outputs?kind=extraction", {
+        token,
+      }),
     ]);
-    if (s.status === 401 || f.status === 401) return onAuthExpired();
-    if (s.data) setStatus(s.data);
+    if (s.status === 401 || f.status === 401 || o.status === 401) {
+      return onAuthExpired();
+    }
+    if (s.data) {
+      setStatus(s.data);
+      if (s.data.can_write_all) {
+        const membersRes = await call<{ members: MemberRow[] }>("GET", "/members", {
+          token,
+        });
+        if (membersRes.status === 401) return onAuthExpired();
+        if (membersRes.data) setMembers(membersRes.data.members);
+      } else {
+        setMembers([]);
+      }
+    }
     if (f.data) setFiles(f.data.files);
     if (m.data) setMemories(m.data.memories);
+    if (o.data) setExtractions(o.data.outputs);
   }, [token, onAuthExpired]);
 
   async function deleteMemory(id: string) {
+    if (status?.is_read_only) return;
     await call("DELETE", `/memories/${id}`, { token });
     refresh();
+  }
+
+  async function updateMemberRole(userId: string, role: MemberRow["role"]) {
+    setAccessMessage(null);
+    const r = await call<{ member: MemberRow }>("PATCH", `/members/${userId}`, {
+      token,
+      json: { role },
+    });
+    if (r.status === 401) return onAuthExpired();
+    if (r.error) {
+      setAccessMessage(r.error);
+      return;
+    }
+    refresh();
+  }
+
+  async function exportConversation(format: "markdown" | "txt") {
+    setExportBusy(format);
+    setExportMessage(null);
+    const r = await call<ConversationExport>("POST", "/conversation/export", {
+      token,
+      json: { format, attach: canUpload && attachExport },
+    });
+    setExportBusy(null);
+    if (r.status === 401) return onAuthExpired();
+    if (r.error || !r.data) {
+      setExportMessage({ kind: "error", text: r.error ?? "Export failed" });
+      return;
+    }
+    downloadText(r.data.filename, r.data.mime_type, r.data.content);
+    setExportMessage({
+      kind: "ok",
+      text: r.data.attached
+        ? "Export downloaded and added to the document repository."
+        : "Export downloaded.",
+    });
+    refresh();
+  }
+
+  async function downloadOutput(output: GeneratedOutput) {
+    const res = await fetch(`/api/outputs/${output.id}/download`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) return onAuthExpired();
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const filename =
+      typeof output.metadata?.download_filename === "string"
+        ? output.metadata.download_filename
+        : `${output.title}.txt`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   useEffect(() => {
@@ -56,6 +163,14 @@ export default function Dashboard({
   }, [refresh]);
 
   const hasFiles = files.length > 0;
+  const canUpload = status?.can_upload !== false;
+  const canDelete = status?.can_delete !== false;
+  const canManageRoles = status?.can_write_all === true;
+  const isReadOnly = status?.is_read_only === true;
+
+  useEffect(() => {
+    if (!canUpload && attachExport) setAttachExport(false);
+  }, [attachExport, canUpload]);
 
   const corpusPanel = (
     <div className="space-y-5">
@@ -85,9 +200,52 @@ export default function Dashboard({
             </p>
           </div>
         </div>
+        {status?.role && (
+          <div className="mt-4 flex items-center justify-between gap-2 border-t border-edge pt-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+              Access mode
+            </span>
+            <Badge tone={ROLE_TONE[status.role]}>{status.role}</Badge>
+          </div>
+        )}
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-edge pt-3 text-center">
+          <div>
+            <p className="text-lg font-bold">{status?.processed_documents ?? 0}</p>
+            <p className="text-[10px] uppercase tracking-wide text-faint">
+              Processed
+            </p>
+          </div>
+          <div>
+            <p className="text-lg font-bold">{status?.available_reports ?? 0}</p>
+            <p className="text-[10px] uppercase tracking-wide text-faint">
+              Reports
+            </p>
+          </div>
+          <div>
+            <p className="text-lg font-bold">{status?.available_summaries ?? 0}</p>
+            <p className="text-[10px] uppercase tracking-wide text-faint">
+              Summaries
+            </p>
+          </div>
+          <div>
+            <p className="text-lg font-bold">
+              {status?.exported_conversations ?? 0}
+            </p>
+            <p className="text-[10px] uppercase tracking-wide text-faint">
+              Exports
+            </p>
+          </div>
+        </div>
       </Card>
 
-      <UploadZone token={token} onDone={refresh} onAuthExpired={onAuthExpired} />
+      {canUpload ? (
+        <UploadZone token={token} onDone={refresh} onAuthExpired={onAuthExpired} />
+      ) : (
+        <Alert kind="warn">
+          Author mode is read-only. You can view organisation data and ask collective questions,
+          but uploads and deletes are disabled.
+        </Alert>
+      )}
 
       <div>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
@@ -96,10 +254,128 @@ export default function Dashboard({
         <FileList
           token={token}
           files={files}
+          canDelete={canDelete}
           onChanged={refresh}
           onAuthExpired={onAuthExpired}
         />
       </div>
+
+      {extractions.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
+            Extracted details ({extractions.length})
+          </h3>
+          <ul className="space-y-1.5">
+            {extractions.slice(0, 5).map((output) => (
+              <li
+                key={output.id}
+                className="flex items-center gap-2 rounded-xl border border-edge/80 bg-panel px-3 py-2"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm text-fg">
+                  {output.title.replace("Extracted details: ", "")}
+                </span>
+                <button
+                  onClick={() => downloadOutput(output)}
+                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-inset hover:text-fg"
+                  aria-label={`Download ${output.title}`}
+                >
+                  <IconDownload className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
+          Conversation export
+        </h3>
+        <Card className="space-y-3 p-3">
+          <label className="flex items-start gap-2 text-xs text-muted">
+            <input
+              type="checkbox"
+              checked={canUpload && attachExport}
+              disabled={!canUpload}
+              onChange={(e) => setAttachExport(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-edge text-accent"
+            />
+            <span>
+              {canUpload
+                ? "Add exported conversation to the document repository"
+                : "Attach is disabled in read-only mode"}
+            </span>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <GhostButton
+              onClick={() => exportConversation("markdown")}
+              disabled={!!exportBusy}
+              className="!min-h-9 !px-3 text-xs"
+            >
+              {exportBusy === "markdown" ? "Exporting..." : "Export .md"}
+            </GhostButton>
+            <GhostButton
+              onClick={() => exportConversation("txt")}
+              disabled={!!exportBusy}
+              className="!min-h-9 !px-3 text-xs"
+            >
+              {exportBusy === "txt" ? "Exporting..." : "Export .txt"}
+            </GhostButton>
+          </div>
+        </Card>
+        {exportMessage && (
+          <div className="mt-2">
+            <Alert
+              kind={exportMessage.kind}
+              onClose={() => setExportMessage(null)}
+            >
+              {exportMessage.text}
+            </Alert>
+          </div>
+        )}
+      </div>
+
+      {canManageRoles && (
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
+            Access control ({members.length})
+          </h3>
+          <Card className="space-y-2 p-3">
+            {members.length === 0 ? (
+              <p className="text-xs text-faint">No organisation members found.</p>
+            ) : (
+              members.map((member) => (
+                <div
+                  key={member.user_id}
+                  className="flex items-center gap-2 rounded-lg border border-edge/70 bg-inset px-2.5 py-2"
+                >
+                  <span className="min-w-0 flex-1 truncate text-xs text-muted">
+                    {member.user_id}
+                    {member.user_id === status?.user_id ? " (you)" : ""}
+                  </span>
+                  <select
+                    value={member.role}
+                    onChange={(e) =>
+                      updateMemberRole(member.user_id, e.target.value as MemberRow["role"])
+                    }
+                    className="min-h-8 rounded-lg border border-edge-strong bg-field px-2 text-xs text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    aria-label={`Role for ${member.user_id}`}
+                  >
+                    <option value="user">User</option>
+                    <option value="author">Author</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+              ))
+            )}
+          </Card>
+          {accessMessage && (
+            <div className="mt-2">
+              <Alert onClose={() => setAccessMessage(null)}>{accessMessage}</Alert>
+            </div>
+          )}
+        </div>
+      )}
 
       <div>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
@@ -121,13 +397,15 @@ export default function Dashboard({
                 <span className="min-w-0 flex-1 truncate text-sm text-fg">
                   {m.content}
                 </span>
-                <button
-                  onClick={() => deleteMemory(m.id)}
-                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-inset hover:text-red-400"
-                  aria-label={`Forget: ${m.content}`}
-                >
-                  <IconTrash className="h-3.5 w-3.5" />
-                </button>
+                {!isReadOnly && (
+                  <button
+                    onClick={() => deleteMemory(m.id)}
+                    className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-inset hover:text-red-400"
+                    aria-label={`Forget: ${m.content}`}
+                  >
+                    <IconTrash className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -202,6 +480,7 @@ export default function Dashboard({
                 <AskPanel
                   token={token}
                   hasFiles={hasFiles}
+                  readOnly={isReadOnly}
                   onAuthExpired={onAuthExpired}
                   onAnswered={refresh}
                 />
@@ -210,14 +489,18 @@ export default function Dashboard({
                 <SummarizePanel
                   token={token}
                   hasFiles={hasFiles}
+                  readOnly={isReadOnly}
                   onAuthExpired={onAuthExpired}
+                  onGenerated={refresh}
                 />
               )}
               {tab === "report" && (
                 <ReportPanel
                   token={token}
                   hasFiles={hasFiles}
+                  readOnly={isReadOnly}
                   onAuthExpired={onAuthExpired}
+                  onGenerated={refresh}
                 />
               )}
               {/* mobile-only corpus tab; on desktop the sidebar always shows it,
@@ -229,6 +512,7 @@ export default function Dashboard({
                     <AskPanel
                       token={token}
                       hasFiles={hasFiles}
+                      readOnly={isReadOnly}
                       onAuthExpired={onAuthExpired}
                       onAnswered={refresh}
                     />

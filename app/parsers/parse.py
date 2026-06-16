@@ -1,4 +1,4 @@
-"""File parsers. txt / csv / xlsx / pdf / docx -> single text string.
+"""File parsers. txt / md / csv / xlsx / pdf / docx -> single text string.
 
 Uniform output so everything downstream is format-agnostic.
 """
@@ -6,7 +6,7 @@ import io
 
 import pandas as pd
 
-SUPPORTED_EXTENSIONS = {".txt", ".csv", ".xlsx", ".pdf", ".docx"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".csv", ".xlsx", ".pdf", ".docx"}
 
 
 def _ext(filename: str) -> str:
@@ -84,7 +84,7 @@ def parse_docx(data: bytes) -> str:
 def parse_file(filename: str, data: bytes) -> str:
     """Dispatch by extension. Raises ValueError on unsupported type."""
     ext = _ext(filename)
-    if ext == ".txt":
+    if ext in {".txt", ".md"}:
         return parse_txt(data)
     if ext == ".csv":
         return parse_csv(data)

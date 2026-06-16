@@ -4,6 +4,7 @@ import re
 from app.core.corpus import corpus_stats, fetch_all_texts
 from app.core.decision import answer_decision, looks_decision_support
 from app.core.memory import add_memory, detect_remember, memory_block
+from app.core.outputs import save_message
 from app.core.structured import answer_structured, looks_quantitative
 from app.db.client import service_client
 from app.llm.provider import complete
@@ -28,25 +29,68 @@ SYSTEM = (
 RAG_TOP_K = 15
 
 
+def _record_answer(
+    user_id: str,
+    organization_id: str,
+    result: dict,
+    use_org: bool,
+    persist: bool = True,
+) -> dict:
+    if persist:
+        save_message(
+            user_id,
+            organization_id,
+            "assistant",
+            result.get("answer", ""),
+            use_org,
+            mode=result.get("mode"),
+            sources=result.get("sources") or [],
+            metadata={"sql": result.get("sql")} if result.get("sql") else {},
+        )
+    return result
+
+
 def ask(
     user_id: str,
     organization_id: str,
     question: str,
     use_org: bool = True,
+    persist: bool = True,
+    allow_memory_write: bool = True,
 ) -> dict:
     # light normalize: trim + collapse whitespace (no autocorrect — would mangle
     # domain terms / proper nouns and hurt retrieval)
     question = re.sub(r"\s+", " ", question).strip()
+    if persist:
+        save_message(user_id, organization_id, "user", question, use_org)
 
     # 1) explicit "remember ..." -> save the fact, confirm, skip doc lookup
     fact = detect_remember(question)
     if fact:
+        if not allow_memory_write:
+            return _record_answer(
+                user_id,
+                organization_id,
+                {
+                    "answer": "This account is read-only, so permanent memory changes are disabled.",
+                    "mode": "memory",
+                    "sources": [],
+                },
+                use_org,
+                persist,
+            )
         saved = add_memory(user_id, fact)
-        return {
-            "answer": f"Got it. I will remember that: {saved}",
-            "mode": "memory",
-            "sources": [],
-        }
+        return _record_answer(
+            user_id,
+            organization_id,
+            {
+                "answer": f"Got it. I will remember that: {saved}",
+                "mode": "memory",
+                "sources": [],
+            },
+            use_org,
+            persist,
+        )
 
     mem = memory_block(user_id)
     scope_id = organization_id if use_org else user_id
@@ -55,25 +99,43 @@ def ask(
     # 2) no documents: answer from memory if we have any, else say so
     if stats["total_files"] == 0:
         if not mem:
-            return {"answer": "No documents uploaded yet.", "mode": "none", "sources": []}
+            return _record_answer(
+                user_id,
+                organization_id,
+                {"answer": "No documents uploaded yet.", "mode": "none", "sources": []},
+                use_org,
+                persist,
+            )
         answer = complete(
             "You are a helpful assistant. Answer using only the known user facts "
             "below. If the answer is not among them, say you do not have that "
             "information yet.",
             f"{mem}\n\nQuestion: {question}",
         )
-        return {"answer": answer, "mode": "memory", "sources": []}
+        return _record_answer(
+            user_id,
+            organization_id,
+            {"answer": answer, "mode": "memory", "sources": []},
+            use_org,
+            persist,
+        )
 
     # 3) quantitative questions over tabular data -> exact SQL via DuckDB
     if looks_quantitative(question):
         s = answer_structured(scope_id, question, use_org)
         if s is not None:
-            return s
+            return _record_answer(user_id, organization_id, s, use_org, persist)
 
     # 4) recommendations / prioritization -> grounded decision-support mode.
     # Keep this after structured Q&A so factual counts stay computed by DuckDB.
     if looks_decision_support(question):
-        return answer_decision(user_id, organization_id, question, stats, use_org)
+        return _record_answer(
+            user_id,
+            organization_id,
+            answer_decision(user_id, organization_id, question, stats, use_org),
+            use_org,
+            persist,
+        )
 
     if stats["mode"] == "direct":
         context = fetch_all_texts(scope_id, use_org)
@@ -84,11 +146,10 @@ def ask(
         sb = service_client()
         rpc_args = {
             "p_user_id": user_id,
+            "p_organization_id": organization_id if use_org else None,
             "query_embedding": str(emb),
             "match_count": RAG_TOP_K,
         }
-        if use_org:
-            rpc_args["p_organization_id"] = organization_id
         rows = (
             sb.rpc("match_chunks", rpc_args)
             .execute()
@@ -104,4 +165,10 @@ def ask(
     # inject saved user facts alongside the document grounding
     system = SYSTEM + (f"\n\n{mem}" if mem else "")
     answer = complete(system, user_msg)
-    return {"answer": answer, "mode": stats["mode"], "sources": sources}
+    return _record_answer(
+        user_id,
+        organization_id,
+        {"answer": answer, "mode": stats["mode"], "sources": sources},
+        use_org,
+        persist,
+    )

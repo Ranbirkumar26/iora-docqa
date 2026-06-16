@@ -9,11 +9,14 @@ import math
 
 import pandas as pd
 
+from app.config import STORAGE_BUCKET
 from app.core.corpus import corpus_stats, fetch_all_texts
 from app.core.jobs import create_job, update_job
+from app.core.outputs import save_output
 from app.core.structured import load_tables
 from app.db.client import service_client
 from app.llm.provider import complete
+from app.parsers.parse import parse_file
 
 SYSTEM = (
     "You are a senior research and business analyst. Write grounded, concise "
@@ -90,6 +93,24 @@ def _source_files(scope_id: str, use_org: bool = True) -> list[str]:
     return [r["filename"] for r in rows]
 
 
+def _files_with_text(scope_id: str, use_org: bool = True) -> list[dict]:
+    sb = service_client()
+    files = (
+        sb.table("files")
+        .select("id, filename, storage_path, parsed_text")
+        .eq(_scope_column(use_org), scope_id)
+        .order("upload_date")
+        .execute()
+        .data
+        or []
+    )
+    for f in files:
+        if f.get("parsed_text") is None:
+            raw = sb.storage.from_(STORAGE_BUCKET).download(f["storage_path"])
+            f["parsed_text"] = parse_file(f["filename"], raw)
+    return files
+
+
 def _corpus_context(scope_id: str, use_org: bool = True) -> str:
     context = fetch_all_texts(scope_id, use_org)
     if len(context) <= MAX_REPORT_CONTEXT_CHARS:
@@ -118,8 +139,8 @@ def _save_report(
     sources: list[str],
     structured: str,
     qualitative: str,
+    title: str = "Corpus report",
 ) -> dict:
-    title = "Corpus report"
     row = (
         service_client()
         .table("reports")
@@ -141,12 +162,13 @@ def _save_report(
     return row
 
 
-def list_reports(organization_id: str, limit: int = 20) -> list[dict]:
+def list_reports(scope_id: str, use_org: bool = True, limit: int = 20) -> list[dict]:
+    scope_col = "organization_id" if use_org else "user_id"
     return (
         service_client()
         .table("reports")
         .select("id, title, report, mode, sources, created_at")
-        .eq("organization_id", organization_id)
+        .eq(scope_col, scope_id)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
@@ -155,7 +177,8 @@ def list_reports(organization_id: str, limit: int = 20) -> list[dict]:
     )
 
 
-def get_report(organization_id: str, report_id: str) -> dict | None:
+def get_report(scope_id: str, report_id: str, use_org: bool = True) -> dict | None:
+    scope_col = "organization_id" if use_org else "user_id"
     rows = (
         service_client()
         .table("reports")
@@ -163,7 +186,7 @@ def get_report(organization_id: str, report_id: str) -> dict | None:
             "id, title, report, mode, sources, structured_analysis, "
             "qualitative_analysis, created_at"
         )
-        .eq("organization_id", organization_id)
+        .eq(scope_col, scope_id)
         .eq("id", report_id)
         .limit(1)
         .execute()
@@ -173,8 +196,141 @@ def get_report(organization_id: str, report_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def generate_report(user_id: str, organization_id: str, use_org: bool = True) -> dict:
-    """Generate an executive report over the user's current corpus."""
+def _single_file_report(
+    filename: str,
+    text: str,
+    stats: dict,
+    structured: str,
+    qualitative: str,
+) -> str:
+    context = text
+    if len(context) > MAX_REPORT_CONTEXT_CHARS:
+        context = (
+            context[:MAX_REPORT_CONTEXT_CHARS]
+            + "\n\n[Document truncated for report generation.]"
+        )
+    prompt = (
+        "Create a structured markdown report for this single uploaded document. "
+        "Use these sections exactly: Executive Summary, Key Findings, Extracted "
+        "User/Customer Details, Statistical Signals, Qualitative Signals, Risks, "
+        "Opportunities, Recommendations, Sources.\n\n"
+        f"Document: {filename}\n"
+        f"Corpus stats: {stats}\n\n"
+        f"Structured statistical analysis for this file:\n{structured}\n\n"
+        f"Qualitative extraction for this file:\n{qualitative}\n\n"
+        f"Document text:\n{context}\n\n"
+        "The report must be grounded only in this document."
+    )
+    return complete(SYSTEM, prompt, max_tokens=2200, temperature=0)
+
+
+def _generate_individual_reports(
+    user_id: str,
+    organization_id: str,
+    use_org: bool,
+    stats: dict,
+    job_id: str | None,
+) -> dict:
+    scope_id = organization_id if use_org else user_id
+    files = _files_with_text(scope_id, use_org)
+    tables = load_tables(scope_id, use_org)
+    sections: list[str] = []
+    saved_reports: list[dict] = []
+
+    for f in files:
+        filename = f["filename"]
+        file_tables = [table for table in tables if table[2] == filename]
+        structured = _table_stats(file_tables)
+        text = f.get("parsed_text") or ""
+        qualitative = _qualitative_analysis(
+            text[:MAX_REPORT_CONTEXT_CHARS]
+            if len(text) > MAX_REPORT_CONTEXT_CHARS
+            else text
+        )
+        report = _single_file_report(filename, text, stats, structured, qualitative)
+        title = f"Report: {filename}"
+        sections.append(f"## {filename}\n\n{report}")
+
+        saved_id = None
+        created_at = None
+        if use_org:
+            saved = _save_report(
+                user_id,
+                organization_id,
+                report,
+                stats["mode"],
+                [filename],
+                structured,
+                qualitative,
+                title=title,
+            )
+            saved_id = saved["id"]
+            created_at = saved["created_at"]
+            saved_reports.append(saved)
+
+        save_output(
+            user_id,
+            organization_id,
+            "report",
+            title,
+            report,
+            use_org,
+            file_id=f["id"],
+            sources=[filename],
+            metadata={
+                "report_id": saved_id,
+                "created_at": created_at,
+                "collective": False,
+                "mode": stats["mode"],
+            },
+        )
+
+    batch = "# Individual Reports\n\n" + "\n\n".join(sections)
+    save_output(
+        user_id,
+        organization_id,
+        "report_batch",
+        "Individual reports",
+        batch,
+        use_org,
+        sources=[f["filename"] for f in files],
+        metadata={
+            "file_count": len(files),
+            "report_ids": [r["id"] for r in saved_reports],
+            "collective": False,
+            "mode": stats["mode"],
+        },
+    )
+    if job_id:
+        update_job(
+            job_id,
+            "completed",
+            metadata={"report_ids": [r["id"] for r in saved_reports]},
+        )
+    return {
+        "id": saved_reports[0]["id"] if saved_reports else None,
+        "report_ids": [r["id"] for r in saved_reports],
+        "created_at": saved_reports[0]["created_at"] if saved_reports else None,
+        "report": batch,
+        "mode": stats["mode"],
+        "sources": [f["filename"] for f in files],
+        "structured_analysis": "\n\n".join(
+            f"### {f['filename']}\n{_table_stats([t for t in tables if t[2] == f['filename']])}"
+            for f in files
+        ),
+        "qualitative_analysis": "Saved inside each individual report.",
+        "job_id": job_id,
+        "collective": False,
+    }
+
+
+def generate_report(
+    user_id: str,
+    organization_id: str,
+    use_org: bool = True,
+    collective: bool = False,
+) -> dict:
+    """Generate individual reports by default; collective only when requested."""
     scope_id = organization_id if use_org else user_id
     stats = corpus_stats(scope_id, use_org)
     if stats["total_files"] == 0:
@@ -186,10 +342,17 @@ def generate_report(user_id: str, organization_id: str, use_org: bool = True) ->
             "structured_analysis": "",
             "qualitative_analysis": "",
             "job_id": None,
+            "collective": collective,
         }
 
-    job_id = create_job(user_id, organization_id, "report_generation") if use_org else None
+    job_kind = "collective_report_generation" if collective else "individual_report_generation"
+    job_id = create_job(user_id, organization_id, job_kind) if use_org else None
     try:
+        if not collective:
+            return _generate_individual_reports(
+                user_id, organization_id, use_org, stats, job_id
+            )
+
         sources = _source_files(scope_id, use_org)
         tables = load_tables(scope_id, use_org)
         structured = _table_stats(tables)
@@ -217,6 +380,7 @@ def generate_report(user_id: str, organization_id: str, use_org: bool = True) ->
                 sources,
                 structured,
                 qualitative,
+                title="Collective report",
             )
             saved_id = saved["id"]
             created_at = saved["created_at"]
@@ -224,6 +388,16 @@ def generate_report(user_id: str, organization_id: str, use_org: bool = True) ->
         else:
             saved_id = None
             created_at = None
+        save_output(
+            user_id,
+            organization_id,
+            "collective_report",
+            "Collective report",
+            report,
+            use_org,
+            sources=sources,
+            metadata={"report_id": saved_id, "collective": True, "mode": stats["mode"]},
+        )
         return {
             "id": saved_id,
             "created_at": created_at,
@@ -233,6 +407,7 @@ def generate_report(user_id: str, organization_id: str, use_org: bool = True) ->
             "structured_analysis": structured,
             "qualitative_analysis": qualitative,
             "job_id": job_id,
+            "collective": True,
         }
     except Exception as e:
         if job_id:

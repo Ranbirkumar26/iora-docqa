@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { call, JobRow, ReportResponse, ReportRow } from "@/lib/api";
+import { call, GeneratedOutput, JobRow, ReportResponse, ReportRow } from "@/lib/api";
 import { useSessionState } from "@/lib/session-state";
 import { Alert, Badge, Card, GhostButton, PrimaryButton, Spinner } from "@/components/ui";
 import Markdown from "@/components/Markdown";
@@ -19,16 +19,41 @@ function downloadMarkdown(text: string) {
 
 const REPORT_STATE_KEY = "docqa:report-panel";
 
+function outputToReport(output: GeneratedOutput): ReportResponse {
+  const mode =
+    output.metadata?.mode === "rag" || output.metadata?.mode === "direct"
+      ? output.metadata.mode
+      : "direct";
+  const reportId =
+    typeof output.metadata?.report_id === "string"
+      ? output.metadata.report_id
+      : null;
+  return {
+    id: reportId,
+    created_at: output.created_at,
+    report: output.content,
+    mode,
+    sources: output.sources ?? [],
+    structured_analysis: "",
+    qualitative_analysis: "",
+    collective: output.kind === "collective_report",
+  };
+}
+
 export default function ReportPanel({
   token,
   hasFiles,
+  readOnly = false,
   onAuthExpired,
+  onGenerated,
 }: {
   token: string;
   hasFiles: boolean;
+  readOnly?: boolean;
   onAuthExpired: () => void;
+  onGenerated?: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"individual" | "collective" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useSessionState<ReportResponse | null>(
     REPORT_STATE_KEY,
@@ -38,28 +63,41 @@ export default function ReportPanel({
   const [jobs, setJobs] = useState<JobRow[]>([]);
 
   const refreshHistory = useCallback(async () => {
-    const [r, j] = await Promise.all([
+    const [r, j, o] = await Promise.all([
       call<{ reports: ReportRow[] }>("GET", "/reports", { token }),
       call<{ jobs: JobRow[] }>("GET", "/jobs", { token }),
+      call<{ outputs: GeneratedOutput[] }>(
+        "GET",
+        "/outputs?kind=report_batch,collective_report",
+        { token },
+      ),
     ]);
-    if (r.status === 401 || j.status === 401) return onAuthExpired();
+    if (r.status === 401 || j.status === 401 || o.status === 401) {
+      return onAuthExpired();
+    }
     if (r.data) setReports(r.data.reports);
     if (j.data) setJobs(j.data.jobs);
+    if (o.data?.outputs.length) setResult(outputToReport(o.data.outputs[0]));
   }, [token, onAuthExpired]);
 
   useEffect(() => {
     if (hasFiles) refreshHistory();
   }, [hasFiles, refreshHistory]);
 
-  async function run() {
-    setBusy(true);
+  async function run(collective = false) {
+    if (readOnly) return;
+    setBusy(collective ? "collective" : "individual");
     setError(null);
-    const r = await call<ReportResponse>("POST", "/report", { token });
-    setBusy(false);
+    const r = await call<ReportResponse>("POST", "/report", {
+      token,
+      json: { collective },
+    });
+    setBusy(null);
     if (r.status === 401) return onAuthExpired();
     if (r.error || !r.data) return setError(r.error ?? "Something went wrong");
     setResult(r.data);
     refreshHistory();
+    onGenerated?.();
   }
 
   async function openReport(id: string) {
@@ -74,16 +112,27 @@ export default function ReportPanel({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted">
-          Generate an executive report with statistical and qualitative signals.
+          {readOnly
+            ? "Read-only mode can view saved reports. Use Ask for unsaved analysis."
+            : "Generate document-level reports first, then combine them on demand."}
         </p>
-        <PrimaryButton
-          onClick={run}
-          loading={busy}
-          disabled={!hasFiles}
-          className="w-full sm:w-auto"
-        >
-          {busy ? "Generating..." : result ? "Regenerate" : "Generate report"}
-        </PrimaryButton>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <PrimaryButton
+            onClick={() => run(false)}
+            loading={busy === "individual"}
+            disabled={!hasFiles || !!busy || readOnly}
+            className="w-full sm:w-auto"
+          >
+            {busy === "individual" ? "Generating..." : "Individual reports"}
+          </PrimaryButton>
+          <GhostButton
+            onClick={() => run(true)}
+            disabled={!hasFiles || !!busy || readOnly}
+            className="w-full sm:w-auto"
+          >
+            {busy === "collective" ? "Combining..." : "Collective report"}
+          </GhostButton>
+        </div>
       </div>
 
       {error && <Alert onClose={() => setError(null)}>{error}</Alert>}
@@ -118,7 +167,9 @@ export default function ReportPanel({
           <IconClipboard className="mx-auto h-7 w-7 text-faint" />
           <p className="mt-2 text-sm text-muted">
             {hasFiles
-              ? "Turn the uploaded corpus into a structured decision report."
+              ? readOnly
+                ? "No saved reports are available in this workspace yet."
+                : "Turn the uploaded corpus into a structured decision report."
               : "Upload documents first, then generate a report."}
           </p>
         </div>

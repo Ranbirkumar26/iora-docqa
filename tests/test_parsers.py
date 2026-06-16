@@ -79,6 +79,7 @@ def test_pdf_empty_no_crash():
 
 def test_dispatch_by_extension():
     assert parse_file("notes.txt", b"hi") == "hi"
+    assert parse_file("conversation.md", b"# Export\n\nhello") == "# Export\n\nhello"
 
 
 def test_unsupported_type_raises():

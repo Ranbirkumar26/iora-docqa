@@ -47,12 +47,13 @@ def update_job(job_id: str, status: str, detail: str | None = None, metadata: di
 
 
 @transient_retry()
-def list_jobs(organization_id: str, limit: int = 10) -> list[dict]:
+def list_jobs(scope_id: str, use_org: bool = True, limit: int = 10) -> list[dict]:
+    scope_col = "organization_id" if use_org else "user_id"
     return (
         service_client()
         .table("processing_jobs")
         .select("id, kind, status, detail, metadata, created_at, updated_at")
-        .eq("organization_id", organization_id)
+        .eq(scope_col, scope_id)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()

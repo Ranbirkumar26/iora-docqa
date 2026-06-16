@@ -99,9 +99,21 @@ export type Status = {
   total_chars: number;
   total_tokens: number;
   mode: "direct" | "rag";
+  processed_documents?: number;
+  available_reports?: number;
+  available_summaries?: number;
+  exported_conversations?: number;
+  generated_outputs?: number;
   organization_id?: string;
   organization_name?: string;
   org_enabled?: boolean;
+  user_id?: string;
+  role?: "user" | "author" | "admin";
+  can_read_all?: boolean;
+  can_write_all?: boolean;
+  is_read_only?: boolean;
+  can_upload?: boolean;
+  can_delete?: boolean;
 };
 
 export type FileRow = {
@@ -127,19 +139,59 @@ export type AskResponse = {
   sql?: string;
 };
 
+export type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  mode?: AskResponse["mode"] | null;
+  sources: string[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type GeneratedOutput = {
+  id: string;
+  kind: string;
+  title: string;
+  content: string;
+  format: string;
+  sources: string[];
+  metadata: Record<string, unknown>;
+  storage_path?: string | null;
+  file_id?: string | null;
+  created_at: string;
+};
+
+export type ConversationExport = {
+  filename: string;
+  mime_type: string;
+  content: string;
+  attached: boolean;
+  attached_file?: unknown;
+};
+
 export type Memory = {
   id: string;
   content: string;
   created_at: string;
 };
 
+export type MemberRow = {
+  organization_id: string;
+  user_id: string;
+  role: "user" | "author" | "admin";
+  created_at: string;
+};
+
 export type SummarizeResponse = {
   summary: string;
   mode: "direct" | "rag" | "none";
+  collective?: boolean;
 };
 
 export type ReportResponse = {
   id: string | null;
+  report_ids?: string[];
   created_at?: string | null;
   job_id?: string | null;
   report: string;
@@ -147,6 +199,7 @@ export type ReportResponse = {
   sources: string[];
   structured_analysis: string;
   qualitative_analysis: string;
+  collective?: boolean;
 };
 
 export type ReportRow = {

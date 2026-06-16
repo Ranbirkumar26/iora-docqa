@@ -14,6 +14,10 @@ def test_other_triggers():
     assert detect_remember("keep in mind that I prefer short answers") == (
         "I prefer short answers"
     )
+    assert detect_remember("add my name is Ranbir to permanent memory") == (
+        "my name is Ranbir"
+    )
+    assert detect_remember("save I love chicken to memory") == "I love chicken"
 
 
 def test_identity_statements():

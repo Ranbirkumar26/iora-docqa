@@ -55,7 +55,7 @@ CHUNK_OVERLAP_CHARS = 400    # ~100 tokens
 # --- upload limits ---
 MAX_FILES_PER_BATCH = 100
 MAX_FILE_SIZE_MB = 10
-SUPPORTED_EXTENSIONS = {".txt", ".csv", ".xlsx", ".pdf", ".docx"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".csv", ".xlsx", ".pdf", ".docx"}
 
 # --- storage ---
 STORAGE_BUCKET = "user-documents"
