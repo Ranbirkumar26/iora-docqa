@@ -145,6 +145,9 @@ create index if not exists idx_conversation_user_created on conversation_message
 create index if not exists idx_outputs_org_kind_created on generated_outputs(organization_id, kind, created_at desc);
 create index if not exists idx_outputs_user_kind_created on generated_outputs(user_id, kind, created_at desc);
 create index if not exists idx_outputs_file_kind on generated_outputs(file_id, kind);
+create index if not exists idx_organizations_created_by on organizations(created_by);
+create index if not exists idx_reports_user on reports(user_id);
+create index if not exists idx_jobs_user on processing_jobs(user_id);
 
 -- Backfill existing users/rows when this schema is applied to an older project.
 insert into organizations (name, created_by)
@@ -565,6 +568,7 @@ create policy memories_owner on memories
 -- ===== Vector search RPC: top-k chunks for a user =====
 -- Called from backend. Filters by organisation_id first, with user_id fallback
 -- for legacy rows not yet backfilled with organisation_id.
+drop function if exists match_chunks(uuid, vector, integer);
 create or replace function match_chunks(
     p_organization_id uuid,
     p_user_id     uuid,
@@ -577,6 +581,7 @@ returns table (
     similarity float
 )
 language sql stable
+set search_path = public
 as $$
     select
         c.content,
