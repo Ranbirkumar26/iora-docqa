@@ -1,12 +1,13 @@
 """Organisation helpers.
 
-Every user gets a personal organisation by default. The rest of the app scopes
-shared corpus data by organisation_id while keeping auth/memory user-scoped.
+All users join one default organisation. Normal users still read/write only
+their own rows; author/admin roles can read the organisation-wide corpus.
 """
 from dataclasses import dataclass
 
 from postgrest.exceptions import APIError
 
+from app.config import APP_ADMIN_EMAILS, DEFAULT_ORGANIZATION_NAME
 from app.db.client import service_client, transient_retry
 
 ROLE_ALIASES = {
@@ -72,6 +73,10 @@ def normalize_role(role: str | None) -> str:
     return ROLE_ALIASES.get((role or "user").strip().lower(), "user")
 
 
+def is_bootstrap_admin(email: str | None) -> bool:
+    return bool(email and email.strip().lower() in APP_ADMIN_EMAILS)
+
+
 def _name_from_email(email: str | None) -> str:
     if not email or "@" not in email:
         return "Personal workspace"
@@ -100,15 +105,48 @@ def _org_schema_missing(exc: APIError) -> bool:
     )
 
 
+def _get_or_create_default_org(sb, user_id: str | None = None) -> dict:
+    rows = (
+        sb.table("organizations")
+        .select("id, name")
+        .eq("name", DEFAULT_ORGANIZATION_NAME)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if rows:
+        return rows[0]
+    payload = {"name": DEFAULT_ORGANIZATION_NAME}
+    if user_id:
+        payload["created_by"] = user_id
+    return sb.table("organizations").insert(payload).execute().data[0]
+
+
+def _user_email(user_id: str) -> str | None:
+    try:
+        res = service_client().auth.admin.get_user_by_id(user_id)
+        user = getattr(res, "user", None)
+        return getattr(user, "email", None)
+    except Exception:
+        return None
+
+
 @transient_retry()
 def create_personal_org(user_id: str, email: str | None = None) -> AuthContext:
-    """Create the default organisation for a new user if needed."""
+    """Return/create the default organisation membership for a user.
+
+    Only configured bootstrap admin emails are auto-admin. Everyone else starts
+    as user and can be promoted later by an admin.
+    """
     sb = service_client()
     try:
+        default_org = _get_or_create_default_org(sb, user_id)
         existing = (
             sb.table("organization_members")
             .select("organization_id, role, organizations(name)")
             .eq("user_id", user_id)
+            .eq("organization_id", default_org["id"])
             .limit(1)
             .execute()
             .data
@@ -121,29 +159,34 @@ def create_personal_org(user_id: str, email: str | None = None) -> AuthContext:
     if existing:
         row = existing[0]
         org = row.get("organizations") or {}
+        role = normalize_role(row.get("role"))
+        if is_bootstrap_admin(email) and role != "admin":
+            row = (
+                sb.table("organization_members")
+                .update({"role": "admin"})
+                .eq("organization_id", default_org["id"])
+                .eq("user_id", user_id)
+                .execute()
+                .data[0]
+            )
+            role = normalize_role(row.get("role"))
         return AuthContext(
             user_id,
             row["organization_id"],
             org.get("name") or "Workspace",
-            normalize_role(row.get("role")),
+            role,
         )
 
-    name = _name_from_email(email)
-    org = (
-        sb.table("organizations")
-        .insert({"name": name, "created_by": user_id})
-        .execute()
-        .data[0]
-    )
+    role = "admin" if is_bootstrap_admin(email) else "user"
     sb.table("organization_members").insert(
-        {"organization_id": org["id"], "user_id": user_id, "role": "admin"}
+        {"organization_id": default_org["id"], "user_id": user_id, "role": role}
     ).execute()
-    return AuthContext(user_id, org["id"], org["name"], "admin")
+    return AuthContext(user_id, default_org["id"], default_org["name"], role)
 
 
 @transient_retry()
 def get_user_org(user_id: str, email: str | None = None) -> AuthContext:
-    """Return the user's active org; create a personal one when none exists."""
+    """Return the user's active org; create default membership when missing."""
     return create_personal_org(user_id, email)
 
 
@@ -157,7 +200,18 @@ def list_org_members(organization_id: str) -> list[dict]:
         .data
         or []
     )
-    return [{**row, "role": normalize_role(row.get("role"))} for row in rows]
+    enriched = []
+    for row in rows:
+        email = _user_email(row["user_id"])
+        enriched.append(
+            {
+                **row,
+                "email": email,
+                "role": normalize_role(row.get("role")),
+                "is_bootstrap_admin": is_bootstrap_admin(email),
+            }
+        )
+    return enriched
 
 
 def set_org_member_role(organization_id: str, user_id: str, role: str) -> dict | None:
@@ -167,6 +221,11 @@ def set_org_member_role(organization_id: str, user_id: str, role: str) -> dict |
     normalized = normalize_role(role)
     if normalized not in VALID_ROLES:
         raise ValueError("Role must be user, author, or admin")
+    email = _user_email(user_id)
+    if normalized == "admin" and not is_bootstrap_admin(email):
+        raise ValueError("Only configured bootstrap admin emails can be admin")
+    if is_bootstrap_admin(email) and normalized != "admin":
+        raise ValueError("Bootstrap admin accounts must remain admin")
     rows = (
         service_client()
         .table("organization_members")

@@ -1,4 +1,4 @@
-from app.core.orgs import AuthContext, normalize_role
+from app.core.orgs import AuthContext, is_bootstrap_admin, normalize_role
 
 
 def test_role_aliases_normalize_legacy_values():
@@ -6,6 +6,12 @@ def test_role_aliases_normalize_legacy_values():
     assert normalize_role("member") == "user"
     assert normalize_role("author") == "author"
     assert normalize_role("unknown") == "user"
+
+
+def test_only_configured_email_is_bootstrap_admin():
+    assert is_bootstrap_admin("rk26.ftw@gmail.com")
+    assert is_bootstrap_admin(" RK26.FTW@GMAIL.COM ")
+    assert not is_bootstrap_admin("someone@example.com")
 
 
 def test_user_role_reads_and_writes_own_scope():

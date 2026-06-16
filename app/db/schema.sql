@@ -3,7 +3,7 @@
 
 create extension if not exists vector;
 
--- ===== Organisations: multi-tenant workspace boundary =====
+-- ===== Organisations: shared workspace boundary =====
 create table if not exists organizations (
     id          uuid primary key default gen_random_uuid(),
     name        text not null,
@@ -150,28 +150,45 @@ create index if not exists idx_reports_user on reports(user_id);
 create index if not exists idx_jobs_user on processing_jobs(user_id);
 
 -- Backfill existing users/rows when this schema is applied to an older project.
+-- All users join the shared workspace. Only the bootstrap admin email is
+-- promoted automatically; everyone else is inserted as user.
 insert into organizations (name, created_by)
 select
-    coalesce(nullif(split_part(u.email, '@', 1), ''), 'Personal') || '''s workspace',
-    u.id
-from auth.users u
+    'iORA Workspace',
+    (select id from auth.users where lower(email) = 'rk26.ftw@gmail.com' limit 1)
 where not exists (
-    select 1 from organization_members om where om.user_id = u.id
+    select 1 from organizations where name = 'iORA Workspace'
 );
 
 insert into organization_members (organization_id, user_id, role)
-select o.id, o.created_by, 'admin'
+select
+    o.id,
+    u.id,
+    case when lower(u.email) = 'rk26.ftw@gmail.com' then 'admin' else 'user' end
 from organizations o
-where o.created_by is not null
-  and not exists (
-      select 1 from organization_members om
-      where om.organization_id = o.id and om.user_id = o.created_by
-  );
+cross join auth.users u
+where o.name = 'iORA Workspace'
+on conflict (organization_id, user_id) do nothing;
+
+update organization_members om
+set role = 'admin'
+from organizations o, auth.users u
+where om.organization_id = o.id
+  and om.user_id = u.id
+  and o.name = 'iORA Workspace'
+  and lower(u.email) = 'rk26.ftw@gmail.com';
+
+update organization_members om
+set role = 'user'
+from auth.users u
+where om.user_id = u.id
+  and lower(u.email) <> 'rk26.ftw@gmail.com'
+  and om.role = 'admin';
 
 update files f
-set organization_id = om.organization_id
-from organization_members om
-where f.organization_id is null and f.user_id = om.user_id;
+set organization_id = o.id
+from organizations o
+where o.name = 'iORA Workspace';
 
 update document_chunks c
 set organization_id = f.organization_id
@@ -179,14 +196,50 @@ from files f
 where c.organization_id is null and c.file_id = f.id;
 
 update conversation_messages cm
-set organization_id = om.organization_id
-from organization_members om
-where cm.organization_id is null and cm.user_id = om.user_id;
+set organization_id = o.id
+from organizations o
+where o.name = 'iORA Workspace';
 
 update generated_outputs go
-set organization_id = om.organization_id
-from organization_members om
-where go.organization_id is null and go.user_id = om.user_id;
+set organization_id = o.id
+from organizations o
+where o.name = 'iORA Workspace';
+
+update reports r
+set organization_id = o.id
+from organizations o
+where o.name = 'iORA Workspace';
+
+update processing_jobs j
+set organization_id = o.id
+from organizations o
+where o.name = 'iORA Workspace';
+
+delete from organizations
+where name <> 'iORA Workspace';
+
+create or replace function enforce_org_member_role()
+returns trigger
+language plpgsql
+set search_path = public, auth
+as $$
+declare
+    member_email text;
+begin
+    select lower(email) into member_email from auth.users where id = new.user_id;
+    if member_email = 'rk26.ftw@gmail.com' then
+        new.role := 'admin';
+    elsif new.role = 'admin' then
+        raise exception 'Only configured bootstrap admin emails can be admin';
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_org_member_role on organization_members;
+create trigger trg_enforce_org_member_role
+    before insert or update of role, user_id on organization_members
+    for each row execute function enforce_org_member_role();
 
 -- approximate-nearest-neighbour index for similarity search
 create index if not exists idx_chunks_embedding on document_chunks

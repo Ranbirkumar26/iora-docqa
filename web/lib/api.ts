@@ -179,7 +179,9 @@ export type Memory = {
 export type MemberRow = {
   organization_id: string;
   user_id: string;
+  email?: string | null;
   role: "user" | "author" | "admin";
+  is_bootstrap_admin?: boolean;
   created_at: string;
 };
 

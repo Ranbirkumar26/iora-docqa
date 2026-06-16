@@ -6,12 +6,12 @@
 Upload txt/md/csv/xlsx/pdf/docx files, ask questions and get summaries grounded in your documents.
 Files persist per user and accumulate into one queryable corpus across sessions.
 Responsive web app: works on desktop and mobile browsers, light/dark theme.
-Each user gets a personal organisation workspace by default, so corpus data is
-scoped by `organization_id` and can grow into team multi-tenancy.
+All users join one shared organisation workspace. New accounts start as `user`;
+only configured admin email(s) can manage role upgrades.
 
 ## Current Additions
 
-- Organisation-scoped corpus data via default personal workspaces.
+- Organisation-scoped corpus data via one shared workspace.
 - Saved report history as an organisation knowledge repository.
 - Durable conversation history and generated outputs, so Ask/Summary/Report
   content survives navigation and refreshes after the schema is applied.
@@ -64,8 +64,8 @@ capped at 30 facts). Capture is heuristic today, swappable to an LLM intent chec
 
 ## Access Modes
 
-Every account belongs to an organisation. The backend enforces access with an
-`organization_members.role` value:
+Every account belongs to the shared organisation. The backend enforces access
+with an `organization_members.role` value:
 
 | Role | Scope | Permissions |
 |---|---|---|
@@ -75,6 +75,8 @@ Every account belongs to an organisation. The backend enforces access with an
 
 Admins can manage roles from the dashboard Access Control panel. The API also exposes
 `GET /api/members` and `PATCH /api/members/{user_id}` for role management.
+Only emails listed in `APP_ADMIN_EMAILS` become admin automatically. Everyone
+else is created as `user`, then can be promoted by an admin.
 
 ## LLM fallback chain
 
@@ -110,10 +112,11 @@ Reorder anytime with the `LLM_CHAIN` env var, no code change.
 1. Copy `.env.template` to `.env` and fill `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
    `SUPABASE_SERVICE_KEY`, plus at least one LLM key (`GROQ_API_KEY`, `GEMINI_API_KEY`,
    `QWEN_API_KEY`). Gemini is required for embeddings. Missing LLM keys are skipped in the chain.
+   Set `APP_ADMIN_EMAILS` to the comma-separated list of bootstrap admin emails.
 2. Apply `app/db/schema.sql` in the Supabase SQL editor; create a private storage
    bucket named `user-documents`. Re-run the schema after updates; it includes
    idempotent `alter table ... add column if not exists` and backfill SQL for
-   organisation workspaces, generated outputs, and role normalization.
+   the shared organisation workspace, generated outputs, and role normalization.
 3. Backend deps: `python -m venv .venv && .venv/bin/pip install -r requirements.txt`
 4. Frontend deps: `cd web && npm install`
 
@@ -175,7 +178,7 @@ app/
     structured.py    DuckDB SQL path for quantitative questions
     report.py        deterministic stats + qualitative synthesis -> report
     jobs.py          sync job records now, ready for async workers later
-    orgs.py          personal organisation workspace helpers
+    orgs.py          shared organisation workspace helpers
     summarize.py     individual summaries + explicit collective summaries
     memory.py        per-user remember/recall (capture, store, inject)
   db/                supabase clients, schema.sql

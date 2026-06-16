@@ -14,6 +14,16 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
+# --- access control ---
+# Bootstrap admin emails are the only accounts promoted automatically. Everyone
+# else starts as a normal user until an admin changes their role in the app.
+APP_ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("APP_ADMIN_EMAILS", "rk26.ftw@gmail.com").split(",")
+    if email.strip()
+}
+DEFAULT_ORGANIZATION_NAME = os.getenv("DEFAULT_ORGANIZATION_NAME", "iORA Workspace")
+
 # --- LLM fallback chain ---
 # Ordered, comma-separated provider names. First is the everyday primary; each
 # next is tried when the previous is rate-limited. Providers without a key set

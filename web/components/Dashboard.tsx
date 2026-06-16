@@ -350,7 +350,7 @@ export default function Dashboard({
                   className="flex items-center gap-2 rounded-lg border border-edge/70 bg-inset px-2.5 py-2"
                 >
                   <span className="min-w-0 flex-1 truncate text-xs text-muted">
-                    {member.user_id}
+                    {member.email || member.user_id}
                     {member.user_id === status?.user_id ? " (you)" : ""}
                   </span>
                   <select
@@ -358,12 +358,18 @@ export default function Dashboard({
                     onChange={(e) =>
                       updateMemberRole(member.user_id, e.target.value as MemberRow["role"])
                     }
+                    disabled={member.is_bootstrap_admin}
                     className="min-h-8 rounded-lg border border-edge-strong bg-field px-2 text-xs text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-                    aria-label={`Role for ${member.user_id}`}
+                    aria-label={`Role for ${member.email || member.user_id}`}
                   >
-                    <option value="user">User</option>
-                    <option value="author">Author</option>
-                    <option value="admin">Admin</option>
+                    {member.is_bootstrap_admin ? (
+                      <option value="admin">Admin</option>
+                    ) : (
+                      <>
+                        <option value="user">User</option>
+                        <option value="author">Author</option>
+                      </>
+                    )}
                   </select>
                 </div>
               ))
