@@ -31,13 +31,17 @@ upgrades.
 
 ## Screenshots
 
-**Main (dark, brand navy)**
+**Login (dark mode)**
 
-<img src="docs/main.png" alt="Main page in dark mode" width="760">
+<img src="docs/login-dark.png" alt="Login page in dark mode" width="760">
 
-**Login (light)**
+**User access (dark mode)**
 
-<img src="docs/login.png" alt="Login page in light mode" width="340">
+<img src="docs/user-dark.png" alt="User dashboard showing private document workspace" width="760">
+
+**Admin access (dark mode)**
+
+<img src="docs/admin-dark.png" alt="Admin dashboard showing role mode and role-management access" width="760">
 
 ## How it answers
 
