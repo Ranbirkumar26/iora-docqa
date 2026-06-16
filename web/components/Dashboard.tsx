@@ -242,7 +242,7 @@ export default function Dashboard({
         <UploadZone token={token} onDone={refresh} onAuthExpired={onAuthExpired} />
       ) : (
         <Alert kind="warn">
-          Author mode is read-only. You can view organisation data and ask collective questions,
+          Author mode is read-only. You can view and ask questions over your own saved data,
           but uploads and deletes are disabled.
         </Alert>
       )}

@@ -317,7 +317,7 @@ def summarize_endpoint(
     if ctx.is_read_only:
         raise HTTPException(
             403,
-            "Authors are read-only. Use Ask for collective read-only analysis.",
+            "Authors are read-only. Use Ask to query your saved documents.",
         )
     return summarize(
         ctx.user_id,

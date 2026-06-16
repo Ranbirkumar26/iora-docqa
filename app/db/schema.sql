@@ -21,7 +21,8 @@ create table if not exists organization_members (
 );
 
 -- Normalize older role names into the current access modes:
--- user = own workspace, author = organisation-wide read-only, admin = full access.
+-- user = normal own-data access, author = own-data read-only,
+-- admin = own-data access plus role management.
 alter table organization_members drop constraint if exists organization_members_role_check;
 update organization_members set role = 'admin' where role in ('owner', 'admin');
 update organization_members set role = 'user' where role in ('member', 'user') or role is null;
@@ -65,7 +66,7 @@ create table if not exists document_chunks (
 alter table document_chunks
     add column if not exists organization_id uuid references organizations(id) on delete cascade;
 
--- saved generated reports: organisation knowledge repository
+-- saved generated reports: user-private knowledge repository
 create table if not exists reports (
     id                    uuid primary key default gen_random_uuid(),
     organization_id       uuid not null references organizations(id) on delete cascade,
@@ -250,55 +251,20 @@ drop policy if exists files_delete_role on files;
 create policy files_select_role on files
     for select
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role in ('author', 'admin')
-        )
-    );
+    using (user_id = (select auth.uid()));
 create policy files_insert_role on files
     for insert
     to authenticated
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    with check (user_id = (select auth.uid()));
 create policy files_update_role on files
     for update
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    )
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 create policy files_delete_role on files
     for delete
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()));
 
 drop policy if exists chunks_owner on document_chunks;
 drop policy if exists chunks_select_role on document_chunks;
@@ -308,55 +274,20 @@ drop policy if exists chunks_delete_role on document_chunks;
 create policy chunks_select_role on document_chunks
     for select
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role in ('author', 'admin')
-        )
-    );
+    using (user_id = (select auth.uid()));
 create policy chunks_insert_role on document_chunks
     for insert
     to authenticated
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    with check (user_id = (select auth.uid()));
 create policy chunks_update_role on document_chunks
     for update
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    )
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 create policy chunks_delete_role on document_chunks
     for delete
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()));
 
 drop policy if exists reports_member on reports;
 drop policy if exists reports_select_role on reports;
@@ -366,51 +297,20 @@ drop policy if exists reports_delete_admin on reports;
 create policy reports_select_role on reports
     for select
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role in ('author', 'admin')
-        )
-    );
+    using (user_id = (select auth.uid()));
 create policy reports_insert_admin on reports
     for insert
     to authenticated
-    with check (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    with check (user_id = (select auth.uid()));
 create policy reports_update_admin on reports
     for update
     to authenticated
-    using (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    )
-    with check (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 create policy reports_delete_admin on reports
     for delete
     to authenticated
-    using (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()));
 
 drop policy if exists conversation_owner on conversation_messages;
 drop policy if exists conversation_select_role on conversation_messages;
@@ -420,55 +320,20 @@ drop policy if exists conversation_delete_role on conversation_messages;
 create policy conversation_select_role on conversation_messages
     for select
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role in ('author', 'admin')
-        )
-    );
+    using (user_id = (select auth.uid()));
 create policy conversation_insert_role on conversation_messages
     for insert
     to authenticated
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    with check (user_id = (select auth.uid()));
 create policy conversation_update_role on conversation_messages
     for update
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    )
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 create policy conversation_delete_role on conversation_messages
     for delete
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()));
 
 drop policy if exists outputs_owner on generated_outputs;
 drop policy if exists outputs_select_role on generated_outputs;
@@ -478,55 +343,20 @@ drop policy if exists outputs_delete_role on generated_outputs;
 create policy outputs_select_role on generated_outputs
     for select
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role in ('author', 'admin')
-        )
-    );
+    using (user_id = (select auth.uid()));
 create policy outputs_insert_role on generated_outputs
     for insert
     to authenticated
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    with check (user_id = (select auth.uid()));
 create policy outputs_update_role on generated_outputs
     for update
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    )
-    with check (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 create policy outputs_delete_role on generated_outputs
     for delete
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()));
 
 drop policy if exists jobs_member on processing_jobs;
 drop policy if exists jobs_select_role on processing_jobs;
@@ -536,51 +366,20 @@ drop policy if exists jobs_delete_admin on processing_jobs;
 create policy jobs_select_role on processing_jobs
     for select
     to authenticated
-    using (
-        user_id = (select auth.uid())
-        or organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role in ('author', 'admin')
-        )
-    );
+    using (user_id = (select auth.uid()));
 create policy jobs_insert_admin on processing_jobs
     for insert
     to authenticated
-    with check (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    with check (user_id = (select auth.uid()));
 create policy jobs_update_admin on processing_jobs
     for update
     to authenticated
-    using (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    )
-    with check (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 create policy jobs_delete_admin on processing_jobs
     for delete
     to authenticated
-    using (
-        organization_id in (
-            select organization_id from organization_members
-            where user_id = (select auth.uid())
-              and role = 'admin'
-        )
-    );
+    using (user_id = (select auth.uid()));
 
 drop policy if exists memories_owner on memories;
 create policy memories_owner on memories
@@ -589,8 +388,8 @@ create policy memories_owner on memories
     with check (user_id = (select auth.uid()));
 
 -- ===== Vector search RPC: top-k chunks for a user =====
--- Called from backend. Filters by organisation_id first, with user_id fallback
--- for legacy rows not yet backfilled with organisation_id.
+-- Called from backend. If p_organization_id is null, filters strictly by
+-- p_user_id so shared-org rows remain private to their uploader.
 drop function if exists match_chunks(uuid, vector, integer);
 create or replace function match_chunks(
     p_organization_id uuid,
@@ -611,8 +410,14 @@ as $$
         c.filename,
         1 - (c.embedding <=> query_embedding) as similarity
     from document_chunks c
-    where c.organization_id = p_organization_id
-       or (c.organization_id is null and c.user_id = p_user_id)
+    where (
+        p_organization_id is not null
+        and c.organization_id = p_organization_id
+    )
+    or (
+        p_organization_id is null
+        and c.user_id = p_user_id
+    )
     order by c.embedding <=> query_embedding
     limit match_count;
 $$;

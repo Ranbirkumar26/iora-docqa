@@ -1,7 +1,7 @@
 """Organisation helpers.
 
-All users join one default organisation. Normal users still read/write only
-their own rows; author/admin roles can read the organisation-wide corpus.
+All users join one default organisation for role management. Document data is
+always scoped to the signed-in user, regardless of role.
 """
 from dataclasses import dataclass
 
@@ -34,7 +34,7 @@ class AuthContext:
 
     @property
     def can_read_all(self) -> bool:
-        return self.role in {"author", "admin"}
+        return False
 
     @property
     def can_write_all(self) -> bool:
@@ -54,19 +54,19 @@ class AuthContext:
 
     @property
     def read_scope_uses_org(self) -> bool:
-        return self.org_enabled and self.can_read_all
+        return False
 
     @property
     def read_scope_id(self) -> str:
-        return self.organization_id if self.read_scope_uses_org else self.user_id
+        return self.user_id
 
     @property
     def write_scope_uses_org(self) -> bool:
-        return self.org_enabled and self.can_write_all
+        return False
 
     @property
     def write_scope_id(self) -> str:
-        return self.organization_id if self.write_scope_uses_org else self.user_id
+        return self.user_id
 
 
 def normalize_role(role: str | None) -> str:
