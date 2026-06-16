@@ -178,13 +178,6 @@ where om.organization_id = o.id
   and o.name = 'iORA Workspace'
   and lower(u.email) = 'rk26.ftw@gmail.com';
 
-update organization_members om
-set role = 'user'
-from auth.users u
-where om.user_id = u.id
-  and lower(u.email) <> 'rk26.ftw@gmail.com'
-  and om.role = 'admin';
-
 update files f
 set organization_id = o.id
 from organizations o
@@ -217,29 +210,6 @@ where o.name = 'iORA Workspace';
 
 delete from organizations
 where name <> 'iORA Workspace';
-
-create or replace function enforce_org_member_role()
-returns trigger
-language plpgsql
-set search_path = public, auth
-as $$
-declare
-    member_email text;
-begin
-    select lower(email) into member_email from auth.users where id = new.user_id;
-    if member_email = 'rk26.ftw@gmail.com' then
-        new.role := 'admin';
-    elsif new.role = 'admin' then
-        raise exception 'Only configured bootstrap admin emails can be admin';
-    end if;
-    return new;
-end;
-$$;
-
-drop trigger if exists trg_enforce_org_member_role on organization_members;
-create trigger trg_enforce_org_member_role
-    before insert or update of role, user_id on organization_members
-    for each row execute function enforce_org_member_role();
 
 -- approximate-nearest-neighbour index for similarity search
 create index if not exists idx_chunks_embedding on document_chunks

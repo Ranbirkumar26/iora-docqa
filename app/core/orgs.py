@@ -222,8 +222,6 @@ def set_org_member_role(organization_id: str, user_id: str, role: str) -> dict |
     if normalized not in VALID_ROLES:
         raise ValueError("Role must be user, author, or admin")
     email = _user_email(user_id)
-    if normalized == "admin" and not is_bootstrap_admin(email):
-        raise ValueError("Only configured bootstrap admin emails can be admin")
     if is_bootstrap_admin(email) and normalized != "admin":
         raise ValueError("Bootstrap admin accounts must remain admin")
     rows = (

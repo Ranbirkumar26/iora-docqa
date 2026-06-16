@@ -368,6 +368,7 @@ export default function Dashboard({
                       <>
                         <option value="user">User</option>
                         <option value="author">Author</option>
+                        <option value="admin">Admin</option>
                       </>
                     )}
                   </select>
