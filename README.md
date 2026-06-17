@@ -15,6 +15,10 @@ upgrades.
 
 - Keyword full-text search (Postgres `tsvector`) over your corpus via a dedicated Search
   tab and `GET /api/search`, plus hybrid retrieval that fuses keyword + vector hits in Ask.
+- Self-service password reset: a "Forgot password?" flow emails a recovery link; the user
+  sets their own new password in-app. The account is derived from the verified recovery
+  token, never from request input, so no one (admin included) can reset another account or
+  see any password (passwords are stored only as bcrypt hashes by Supabase Auth).
 - User-private corpus data with one shared workspace for role management.
 - Saved report history as a private knowledge repository.
 - Durable conversation history and generated outputs, so Ask/Summary/Report
@@ -126,6 +130,9 @@ Reorder anytime with the `LLM_CHAIN` env var, no code change.
    `SUPABASE_SERVICE_KEY`, plus at least one LLM key (`GROQ_API_KEY`, `GEMINI_API_KEY`,
    `QWEN_API_KEY`). Gemini is required for embeddings. Missing LLM keys are skipped in the chain.
    Set `APP_ADMIN_EMAILS` to the comma-separated list of bootstrap admin emails.
+   Set `APP_BASE_URL` to where the app is served (the password-reset email links back to
+   it). Password reset needs Supabase SMTP enabled (Auth -> Settings) and `APP_BASE_URL`
+   added under Auth -> URL Configuration -> Redirect URLs.
 2. Apply `app/db/schema.sql` in the Supabase SQL editor; create a private storage
    bucket named `user-documents`. Re-run the schema after updates; it includes
    idempotent `alter table ... add column if not exists` and backfill SQL for

@@ -24,6 +24,11 @@ APP_ADMIN_EMAILS = {
 }
 DEFAULT_ORGANIZATION_NAME = os.getenv("DEFAULT_ORGANIZATION_NAME", "iORA Workspace")
 
+# Base URL the password-recovery email link redirects back to. Must be listed
+# in Supabase Auth -> URL Configuration -> Redirect URLs. Override per env
+# (e.g. http://localhost:8000 for local dev).
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://iora-docqa-copy-production.up.railway.app")
+
 # --- LLM fallback chain ---
 # Ordered, comma-separated provider names. First is the everyday primary; each
 # next is tried when the previous is rate-limited. Providers without a key set

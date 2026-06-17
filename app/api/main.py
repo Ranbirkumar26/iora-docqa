@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.config import (
+    APP_BASE_URL,
     MAX_FILE_SIZE_MB,
     MAX_FILES_PER_BATCH,
     STORAGE_BUCKET,
@@ -94,6 +95,14 @@ class RefreshIn(BaseModel):
     refresh_token: str
 
 
+class PasswordResetRequestIn(BaseModel):
+    email: str
+
+
+class PasswordUpdateIn(BaseModel):
+    password: str
+
+
 def _session_payload(res) -> dict:
     session = getattr(res, "session", None)
     user = getattr(res, "user", None)
@@ -161,6 +170,51 @@ def refresh(body: RefreshIn):
     except Exception:
         raise HTTPException(401, "Session expired. Please log in again.")
     return _session_payload(res)
+
+
+@api.post("/auth/request-password-reset")
+def request_password_reset(body: PasswordResetRequestIn):
+    """Ask Supabase to email a recovery link to the address.
+
+    Always returns the same generic response, so the endpoint cannot be used to
+    enumerate which emails have accounts. The reset link is delivered only to the
+    address owner's inbox — no token or link is ever returned here.
+    """
+    email = (body.email or "").strip().lower()
+    if email:
+        try:
+            fresh_anon_client().auth.reset_password_for_email(
+                email, {"redirect_to": APP_BASE_URL}
+            )
+        except Exception:
+            # never reveal whether the address exists or why delivery failed
+            pass
+    return {"ok": True, "message": "If that email has an account, a reset link is on its way."}
+
+
+@api.post("/auth/update-password")
+def update_password(
+    body: PasswordUpdateIn, ctx: AuthContext = Depends(get_auth_context)
+):
+    """Set a new password for the caller.
+
+    The account is identified solely by the verified bearer token (a recovery-link
+    session, or a normal logged-in session) — never by anything in the request
+    body — so a caller can only ever change their own password. The new secret is
+    not logged or echoed back.
+    """
+    password = body.password or ""
+    if len(password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    try:
+        service_client().auth.admin.update_user_by_id(
+            ctx.user_id, {"password": password}
+        )
+    except Exception:
+        raise HTTPException(
+            400, "Could not update password. Request a fresh reset link and try again."
+        )
+    return {"ok": True}
 
 
 # ---------- files ----------

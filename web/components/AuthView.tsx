@@ -6,7 +6,7 @@ import { Alert, Card, Field, PrimaryButton } from "@/components/ui";
 import { Wordmark } from "@/components/Brand";
 import ThemeToggle from "@/components/ThemeToggle";
 
-type Mode = "login" | "signup";
+type Mode = "login" | "signup" | "reset";
 
 export default function AuthView({
   onSession,
@@ -25,6 +25,21 @@ export default function AuthView({
     setError(null);
     setNotice(null);
     setBusy(true);
+
+    if (mode === "reset") {
+      const r = await call<{ message?: string }>(
+        "POST",
+        "/auth/request-password-reset",
+        { json: { email } },
+      );
+      setBusy(false);
+      // generic confirmation regardless of whether the account exists
+      setNotice(
+        r.data?.message ??
+          "If that email has an account, a reset link is on its way.",
+      );
+      return;
+    }
 
     if (mode === "signup") {
       const r = await call<{ user_id: string }>("POST", "/auth/signup", {
@@ -91,24 +106,68 @@ export default function AuthView({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <Field
-              label="Password"
-              type="password"
-              required
-              minLength={6}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              placeholder={mode === "signup" ? "At least 6 characters" : "••••••••"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            {mode !== "reset" && (
+              <Field
+                label="Password"
+                type="password"
+                required
+                minLength={6}
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+                placeholder={
+                  mode === "signup" ? "At least 6 characters" : "••••••••"
+                }
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            )}
+
+            {mode === "reset" && (
+              <p className="text-xs text-muted">
+                Enter your account email and we&apos;ll send a link to set a new
+                password. The link goes only to your inbox.
+              </p>
+            )}
 
             {error && <Alert onClose={() => setError(null)}>{error}</Alert>}
             {notice && <Alert kind="ok">{notice}</Alert>}
 
             <PrimaryButton type="submit" loading={busy} className="w-full">
-              {mode === "login" ? "Log in" : "Create account"}
+              {mode === "reset"
+                ? "Send reset link"
+                : mode === "login"
+                  ? "Log in"
+                  : "Create account"}
             </PrimaryButton>
           </form>
+
+          {mode === "login" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("reset");
+                setError(null);
+                setNotice(null);
+              }}
+              className="mt-4 w-full text-center text-xs font-medium text-faint transition hover:text-fg"
+            >
+              Forgot password?
+            </button>
+          )}
+          {mode === "reset" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("login");
+                setError(null);
+                setNotice(null);
+              }}
+              className="mt-4 w-full text-center text-xs font-medium text-faint transition hover:text-fg"
+            >
+              Back to log in
+            </button>
+          )}
         </Card>
 
         <p className="mt-6 text-center text-xs text-faint">

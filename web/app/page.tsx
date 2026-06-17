@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AuthView from "@/components/AuthView";
+import ResetPasswordView from "@/components/ResetPasswordView";
 import Dashboard from "@/components/Dashboard";
 import { Spinner } from "@/components/ui";
 import { AuthSession, call, configureAuthRefresh } from "@/lib/api";
@@ -29,6 +30,8 @@ export default function Home() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [ready, setReady] = useState(false);
   const [expiredMsg, setExpiredMsg] = useState(false);
+  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
   const sessionRef = useRef<AuthSession | null>(null);
   const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
@@ -37,6 +40,24 @@ export default function Home() {
     sessionRef.current = stored;
     setSession(stored);
     setReady(true);
+  }, []);
+
+  // Supabase recovery links land here with the session in the URL hash. Capture
+  // the token, then strip it from the address bar / history so it isn't left
+  // lying around.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (hash.includes("type=recovery")) {
+      const params = new URLSearchParams(hash.replace(/^#/, ""));
+      const tok = params.get("access_token");
+      if (tok) setRecoveryToken(tok);
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
   }, []);
 
   const save = useCallback((next: AuthSession | null) => {
@@ -91,6 +112,19 @@ export default function Home() {
     );
   }
 
+  if (recoveryToken) {
+    return (
+      <ResetPasswordView
+        token={recoveryToken}
+        onDone={(msg) => {
+          setRecoveryToken(null);
+          setAuthNotice(msg);
+          save(null);
+        }}
+      />
+    );
+  }
+
   if (!session?.access_token) {
     return (
       <>
@@ -99,9 +133,15 @@ export default function Home() {
             Your session expired. Please log in again.
           </p>
         )}
+        {authNotice && (
+          <p className="bg-emerald-500/15 px-4 py-2 text-center text-xs text-emerald-700 dark:text-emerald-300">
+            {authNotice}
+          </p>
+        )}
         <AuthView
           onSession={(next) => {
             setExpiredMsg(false);
+            setAuthNotice(null);
             save(next);
           }}
         />
