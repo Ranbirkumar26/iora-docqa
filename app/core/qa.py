@@ -5,6 +5,7 @@ from app.core.corpus import corpus_stats, fetch_all_texts
 from app.core.decision import answer_decision, looks_decision_support
 from app.core.memory import add_memory, detect_remember, memory_block
 from app.core.outputs import save_message
+from app.core.search import reciprocal_rank_fusion, search_chunks
 from app.core.structured import answer_structured, looks_quantitative
 from app.db.client import service_client
 from app.llm.provider import complete
@@ -142,20 +143,29 @@ def ask(
         user_msg = f"Documents:\n\n{context}\n\nQuestion: {question}"
         sources = []
     else:
+        scope_org = organization_id if use_org else None
         emb = embed_query(question)
         sb = service_client()
-        rpc_args = {
-            "p_user_id": user_id,
-            "p_organization_id": organization_id if use_org else None,
-            "query_embedding": str(emb),
-            "match_count": RAG_TOP_K,
-        }
-        rows = (
-            sb.rpc("match_chunks", rpc_args)
+        # semantic retrieval (pgvector)
+        vec_rows = (
+            sb.rpc(
+                "match_chunks",
+                {
+                    "p_user_id": user_id,
+                    "p_organization_id": scope_org,
+                    "query_embedding": str(emb),
+                    "match_count": RAG_TOP_K,
+                },
+            )
             .execute()
             .data
             or []
         )
+        # keyword retrieval (FTS), fused with the vector hits so exact terms the
+        # embedding misses still surface. Degrades to vector-only when the FTS
+        # schema isn't applied (search_chunks returns []).
+        kw_rows = search_chunks(user_id, question, RAG_TOP_K, scope_org)
+        rows = reciprocal_rank_fusion(vec_rows, kw_rows, limit=RAG_TOP_K)
         context = "\n\n".join(
             f"[Source: {r['filename']}]\n{r['content']}" for r in rows
         )

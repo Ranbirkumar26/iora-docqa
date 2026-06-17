@@ -13,6 +13,8 @@ upgrades.
 
 ## Current Additions
 
+- Keyword full-text search (Postgres `tsvector`) over your corpus via a dedicated Search
+  tab and `GET /api/search`, plus hybrid retrieval that fuses keyword + vector hits in Ask.
 - User-private corpus data with one shared workspace for role management.
 - Saved report history as a private knowledge repository.
 - Durable conversation history and generated outputs, so Ask/Summary/Report
@@ -48,7 +50,9 @@ upgrades.
 Query paths, picked automatically per question:
 
 - **Direct** (corpus < ~150k tokens): all text stuffed into the model context. Max accuracy.
-- **RAG** (larger corpus): chunk -> embed (Gemini) -> pgvector search -> answer from top passages.
+- **RAG** (larger corpus): chunk -> embed (Gemini) -> hybrid search (pgvector + Postgres
+  full-text, fused by reciprocal rank) -> answer from top passages. Keyword hits catch exact
+  names/IDs/codes the embedding misses; falls back to vector-only if the FTS schema isn't applied.
 - **Structured** (quantitative questions over csv/xlsx): the model writes SQL, DuckDB executes
   it on the real table, the model phrases the exact result. No LLM arithmetic.
 - **Decision support** (recommendations / next actions): computed table signals plus document

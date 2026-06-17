@@ -86,6 +86,15 @@ export function IconChat({ className }: P) {
   );
 }
 
+export function IconSearch({ className }: P) {
+  return (
+    <Svg className={className}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </Svg>
+  );
+}
+
 export function IconSun({ className }: P) {
   return (
     <Svg className={className}>

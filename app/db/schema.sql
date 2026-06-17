@@ -66,6 +66,12 @@ create table if not exists document_chunks (
 alter table document_chunks
     add column if not exists organization_id uuid references organizations(id) on delete cascade;
 
+-- full-text search vector (keyword path; complements the pgvector RAG path).
+-- generated + stored so it stays in sync with content and is GIN-indexable.
+alter table document_chunks
+    add column if not exists content_tsv tsvector
+    generated always as (to_tsvector('english', content)) stored;
+
 -- saved generated reports: user-private knowledge repository
 create table if not exists reports (
     id                    uuid primary key default gen_random_uuid(),
@@ -139,6 +145,7 @@ create index if not exists idx_files_org_hash on files(organization_id, content_
 create index if not exists idx_chunks_user on document_chunks(user_id);
 create index if not exists idx_chunks_org on document_chunks(organization_id);
 create index if not exists idx_chunks_file on document_chunks(file_id);
+create index if not exists idx_chunks_content_tsv on document_chunks using gin (content_tsv);
 create index if not exists idx_reports_org_created on reports(organization_id, created_at desc);
 create index if not exists idx_jobs_org_created on processing_jobs(organization_id, created_at desc);
 create index if not exists idx_conversation_org_created on conversation_messages(organization_id, created_at desc);
@@ -419,5 +426,44 @@ as $$
         and c.user_id = p_user_id
     )
     order by c.embedding <=> query_embedding
+    limit match_count;
+$$;
+
+-- ===== Full-text search RPC: keyword ranking over a user's chunks =====
+-- Strictly user-scoped: p_user_id is ALWAYS enforced (unlike match_chunks'
+-- org branch). p_organization_id only narrows further, so this path can never
+-- leak another user's chunks even if a caller passes an org id.
+drop function if exists search_chunks(uuid, uuid, text, integer);
+create or replace function search_chunks(
+    p_organization_id uuid,
+    p_user_id     uuid,
+    query_text    text,
+    match_count   int default 15
+)
+returns table (
+    content   text,
+    filename  text,
+    snippet   text,
+    rank      float
+)
+language sql stable
+set search_path = public
+as $$
+    with q as (
+        select websearch_to_tsquery('english', query_text) as tsq
+    )
+    select
+        c.content,
+        c.filename,
+        ts_headline(
+            'english', c.content, q.tsq,
+            'StartSel=**, StopSel=**, MaxFragments=2, MinWords=5, MaxWords=18'
+        ) as snippet,
+        ts_rank_cd(c.content_tsv, q.tsq) as rank
+    from document_chunks c, q
+    where c.user_id = p_user_id
+      and (p_organization_id is null or c.organization_id = p_organization_id)
+      and c.content_tsv @@ q.tsq
+    order by rank desc
     limit match_count;
 $$;

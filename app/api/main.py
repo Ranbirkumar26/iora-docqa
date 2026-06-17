@@ -47,6 +47,7 @@ from app.core.outputs import (
 )
 from app.core.qa import ask
 from app.core.report import generate_report, get_report, list_reports
+from app.core.search import search_chunks
 from app.core.summarize import summarize
 from app.db.client import anon_client, fresh_anon_client, service_client
 
@@ -307,6 +308,30 @@ def ask_endpoint(body: AskIn, ctx: AuthContext = Depends(get_auth_context)):
         persist=not ctx.is_read_only,
         allow_memory_write=not ctx.is_read_only,
     )
+
+
+@api.get("/search")
+def search_endpoint(
+    q: str = "",
+    limit: int = 15,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Keyword (full-text) search over the user's own document chunks.
+
+    Read-only — available to every role, including authors. Strictly user-scoped
+    (passes None for org so search_chunks filters by user_id only).
+    """
+    query = q.strip()
+    if not query:
+        return {"query": "", "results": []}
+    capped = max(1, min(limit, 50))
+    results = search_chunks(
+        ctx.user_id,
+        query,
+        capped,
+        ctx.organization_id if ctx.read_scope_uses_org else None,
+    )
+    return {"query": query, "results": results}
 
 
 @api.post("/summarize")

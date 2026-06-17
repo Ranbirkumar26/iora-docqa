@@ -139,6 +139,18 @@ export type AskResponse = {
   sql?: string;
 };
 
+export type SearchResult = {
+  content: string;
+  filename: string;
+  snippet: string;
+  rank: number;
+};
+
+export type SearchResponse = {
+  query: string;
+  results: SearchResult[];
+};
+
 export type ConversationMessage = {
   id: string;
   role: "user" | "assistant" | "system";

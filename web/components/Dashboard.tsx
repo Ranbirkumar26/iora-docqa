@@ -17,10 +17,11 @@ import ThemeToggle from "@/components/ThemeToggle";
 import UploadZone from "@/components/UploadZone";
 import FileList from "@/components/FileList";
 import AskPanel from "@/components/AskPanel";
+import SearchPanel from "@/components/SearchPanel";
 import SummarizePanel from "@/components/SummarizePanel";
 import ReportPanel from "@/components/ReportPanel";
 
-type Tab = "ask" | "summarize" | "report" | "files";
+type Tab = "ask" | "search" | "summarize" | "report" | "files";
 
 function fmtTokens(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -457,10 +458,11 @@ export default function Dashboard({
           {/* main column */}
           <main className="min-w-0">
             {/* tab bar; Files tab only exists on mobile */}
-            <nav className="mb-5 grid grid-cols-4 rounded-xl bg-inset p-1 lg:max-w-md lg:grid-cols-3">
+            <nav className="mb-5 grid grid-cols-5 rounded-xl bg-inset p-1 lg:max-w-xl lg:grid-cols-4">
               {(
                 [
                   ["ask", "Ask"],
+                  ["search", "Search"],
                   ["summarize", "Summarize"],
                   ["report", "Report"],
                   ["files", `Files (${files.length})`],
@@ -490,6 +492,13 @@ export default function Dashboard({
                   readOnly={isReadOnly}
                   onAuthExpired={onAuthExpired}
                   onAnswered={refresh}
+                />
+              )}
+              {tab === "search" && (
+                <SearchPanel
+                  token={token}
+                  hasFiles={hasFiles}
+                  onAuthExpired={onAuthExpired}
                 />
               )}
               {tab === "summarize" && (
