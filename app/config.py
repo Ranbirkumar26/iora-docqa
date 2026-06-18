@@ -41,6 +41,11 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "https://iora-docqa-copy-production.up.
 # SPA; set CSP_ENFORCE=true once violation reports look clean to enforce it.
 CSP_ENFORCE = os.getenv("CSP_ENFORCE", "").strip().lower() in {"1", "true", "yes", "on"}
 
+# Defense-in-depth: when true, reads run through a user-JWT client so Postgres
+# RLS enforces (on top of the application-code user_id filters). Off by default
+# until verified live against the RLS policies (a mismatch would empty reads).
+RLS_SCOPED_READS = os.getenv("RLS_SCOPED_READS", "").strip().lower() in {"1", "true", "yes", "on"}
+
 # --- LLM fallback chain ---
 # Ordered, comma-separated provider names. First is the everyday primary; each
 # next is tried when the previous is rate-limited. Providers without a key set

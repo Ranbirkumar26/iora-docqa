@@ -9,7 +9,12 @@ from functools import lru_cache, wraps
 import httpx
 from supabase import create_client, Client
 
-from app.config import SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY
+from app.config import (
+    RLS_SCOPED_READS,
+    SUPABASE_ANON_KEY,
+    SUPABASE_SERVICE_KEY,
+    SUPABASE_URL,
+)
 
 
 @lru_cache
@@ -38,10 +43,13 @@ def user_client(access_token: str) -> Client:
 
 
 def read_client(access_token: str | None = None) -> Client:
-    """User-scoped client when a token is given (RLS-enforced reads), else the
-    service client. For SELECT/RPC reads only — writes/admin keep service_client.
+    """User-scoped client (RLS-enforced) when RLS_SCOPED_READS is on and a token
+    is given, else the service client. For SELECT/RPC reads only — writes/admin
+    keep service_client. Off by default until verified live against the policies.
     """
-    return user_client(access_token) if access_token else service_client()
+    if RLS_SCOPED_READS and access_token:
+        return user_client(access_token)
+    return service_client()
 
 
 def transient_retry(attempts: int = 3, base_delay: float = 0.4):

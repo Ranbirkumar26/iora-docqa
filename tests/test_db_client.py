@@ -4,9 +4,14 @@ import app.db.client as dbc
 def test_read_client_routes_by_token(monkeypatch):
     monkeypatch.setattr(dbc, "user_client", lambda t: ("user", t))
     monkeypatch.setattr(dbc, "service_client", lambda: ("service",))
-    assert dbc.read_client("tok") == ("user", "tok")  # token -> RLS-scoped client
-    assert dbc.read_client(None) == ("service",)  # no token -> service client
-    assert dbc.read_client("") == ("service",)  # empty token -> service client
+    # flag ON: a token routes to the RLS-scoped user client
+    monkeypatch.setattr(dbc, "RLS_SCOPED_READS", True)
+    assert dbc.read_client("tok") == ("user", "tok")
+    assert dbc.read_client(None) == ("service",)
+    assert dbc.read_client("") == ("service",)
+    # flag OFF (default): always the service client, even with a token
+    monkeypatch.setattr(dbc, "RLS_SCOPED_READS", False)
+    assert dbc.read_client("tok") == ("service",)
 
 
 def test_user_client_sets_user_bearer():
