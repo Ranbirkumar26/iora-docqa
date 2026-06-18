@@ -29,6 +29,7 @@ from app.config import (
     SUPPORTED_EXTENSIONS,
 )
 from app.core.account import delete_account
+from app.core.audit import list_audit, write_audit
 from app.core.corpus import corpus_stats
 from app.core.passwords import validate_password
 from app.core.ingest import dedupe_check, delete_file, ingest_one
@@ -39,6 +40,7 @@ from app.core.orgs import (
     VALID_ROLES,
     email_domain_allowed,
     get_user_org,
+    is_bootstrap_admin,
     list_org_members,
     normalize_role,
     set_org_member_role,
@@ -790,7 +792,72 @@ def update_member_role_endpoint(
         raise HTTPException(400, str(exc))
     if not saved:
         raise HTTPException(404, "Member not found")
+    write_audit(
+        ctx.organization_id, ctx.user_id, "role_change", member_user_id,
+        f"role set to {role}",
+    )
     return {"member": {**saved, "role": normalize_role(saved.get("role"))}}
+
+
+def _is_bootstrap_member(user_id: str) -> bool:
+    try:
+        res = service_client().auth.admin.get_user_by_id(user_id)
+        return is_bootstrap_admin(getattr(getattr(res, "user", None), "email", None))
+    except Exception:
+        return False
+
+
+@api.post("/members/{member_user_id}/suspend")
+def suspend_member_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    _require_admin(ctx)
+    if _is_bootstrap_member(member_user_id):
+        raise HTTPException(403, "Cannot suspend a bootstrap admin")
+    try:
+        service_client().auth.admin.update_user_by_id(
+            member_user_id, {"ban_duration": "876000h"}
+        )
+    except Exception:
+        raise HTTPException(400, "Could not suspend user")
+    write_audit(ctx.organization_id, ctx.user_id, "suspend", member_user_id)
+    return {"suspended": member_user_id}
+
+
+@api.post("/members/{member_user_id}/unsuspend")
+def unsuspend_member_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    _require_admin(ctx)
+    try:
+        service_client().auth.admin.update_user_by_id(
+            member_user_id, {"ban_duration": "none"}
+        )
+    except Exception:
+        raise HTTPException(400, "Could not reinstate user")
+    write_audit(ctx.organization_id, ctx.user_id, "unsuspend", member_user_id)
+    return {"unsuspended": member_user_id}
+
+
+@api.delete("/members/{member_user_id}")
+def remove_member_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    _require_admin(ctx)
+    if _is_bootstrap_member(member_user_id):
+        raise HTTPException(403, "Cannot remove a bootstrap admin")
+    try:
+        delete_account(member_user_id)
+    except Exception:
+        raise HTTPException(500, "Could not remove user")
+    write_audit(ctx.organization_id, ctx.user_id, "remove", member_user_id)
+    return {"removed": member_user_id}
+
+
+@api.get("/audit")
+def audit_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    _require_admin(ctx)
+    return {"events": list_audit(ctx.organization_id)}
 
 
 # ---------- memory ----------

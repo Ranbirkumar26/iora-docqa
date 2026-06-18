@@ -194,6 +194,7 @@ export type MemberRow = {
   email?: string | null;
   role: "user" | "author" | "admin";
   is_bootstrap_admin?: boolean;
+  banned?: boolean;
   created_at: string;
 };
 
@@ -222,6 +223,15 @@ export type ReportRow = {
   report: string;
   mode: "direct" | "rag" | "none";
   sources: string[];
+  created_at: string;
+};
+
+export type AuditEvent = {
+  id: string;
+  actor_user_id?: string | null;
+  action: string;
+  target_user_id?: string | null;
+  detail?: string | null;
   created_at: string;
 };
 

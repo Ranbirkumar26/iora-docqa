@@ -215,11 +215,18 @@ def list_org_members(organization_id: str) -> list[dict]:
     )
     enriched = []
     for row in rows:
-        email = _user_email(row["user_id"])
+        user = None
+        try:
+            res = service_client().auth.admin.get_user_by_id(row["user_id"])
+            user = getattr(res, "user", None)
+        except Exception:
+            pass
+        email = getattr(user, "email", None)
         enriched.append(
             {
                 **row,
                 "email": email,
+                "banned": bool(getattr(user, "banned_until", None)),
                 "role": normalize_role(row.get("role")),
                 "is_bootstrap_admin": is_bootstrap_admin(email),
             }

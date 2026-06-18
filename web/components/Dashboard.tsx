@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   call,
+  AuditEvent,
   ConversationExport,
   FileRow,
   GeneratedOutput,
@@ -60,6 +61,7 @@ export default function Dashboard({
   const [files, setFiles] = useState<FileRow[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [members, setMembers] = useState<MemberRow[]>([]);
+  const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [extractions, setExtractions] = useState<GeneratedOutput[]>([]);
   const [attachExport, setAttachExport] = useState(false);
   const [exportBusy, setExportBusy] = useState<"markdown" | "txt" | null>(null);
@@ -84,13 +86,18 @@ export default function Dashboard({
     if (s.data) {
       setStatus(s.data);
       if (s.data.can_write_all) {
-        const membersRes = await call<{ members: MemberRow[] }>("GET", "/members", {
-          token,
-        });
-        if (membersRes.status === 401) return onAuthExpired();
+        const [membersRes, auditRes] = await Promise.all([
+          call<{ members: MemberRow[] }>("GET", "/members", { token }),
+          call<{ events: AuditEvent[] }>("GET", "/audit", { token }),
+        ]);
+        if (membersRes.status === 401 || auditRes.status === 401) {
+          return onAuthExpired();
+        }
         if (membersRes.data) setMembers(membersRes.data.members);
+        if (auditRes.data) setAudit(auditRes.data.events);
       } else {
         setMembers([]);
+        setAudit([]);
       }
     }
     if (f.data) setFiles(f.data.files);
@@ -115,6 +122,32 @@ export default function Dashboard({
       setAccessMessage(r.error);
       return;
     }
+    refresh();
+  }
+
+  async function toggleSuspend(member: MemberRow) {
+    setAccessMessage(null);
+    const path = member.banned
+      ? `/members/${member.user_id}/unsuspend`
+      : `/members/${member.user_id}/suspend`;
+    const r = await call("POST", path, { token });
+    if (r.status === 401) return onAuthExpired();
+    if (r.error) return setAccessMessage(r.error);
+    refresh();
+  }
+
+  async function removeMember(member: MemberRow) {
+    const who = member.email || member.user_id;
+    if (
+      !window.confirm(
+        `Remove ${who}? This permanently deletes their account and all their data.`,
+      )
+    )
+      return;
+    setAccessMessage(null);
+    const r = await call("DELETE", `/members/${member.user_id}`, { token });
+    if (r.status === 401) return onAuthExpired();
+    if (r.error) return setAccessMessage(r.error);
     refresh();
   }
 
@@ -346,36 +379,68 @@ export default function Dashboard({
             {members.length === 0 ? (
               <p className="text-xs text-faint">No organisation members found.</p>
             ) : (
-              members.map((member) => (
-                <div
-                  key={member.user_id}
-                  className="flex items-center gap-2 rounded-lg border border-edge/70 bg-inset px-2.5 py-2"
-                >
-                  <span className="min-w-0 flex-1 truncate text-xs text-muted">
-                    {member.email || member.user_id}
-                    {member.user_id === status?.user_id ? " (you)" : ""}
-                  </span>
-                  <select
-                    value={member.role}
-                    onChange={(e) =>
-                      updateMemberRole(member.user_id, e.target.value as MemberRow["role"])
-                    }
-                    disabled={member.is_bootstrap_admin}
-                    className="min-h-8 rounded-lg border border-edge-strong bg-field px-2 text-xs text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-                    aria-label={`Role for ${member.email || member.user_id}`}
+              members.map((member) => {
+                const isSelf = member.user_id === status?.user_id;
+                return (
+                  <div
+                    key={member.user_id}
+                    className="space-y-1.5 rounded-lg border border-edge/70 bg-inset px-2.5 py-2"
                   >
-                    {member.is_bootstrap_admin ? (
-                      <option value="admin">Admin</option>
-                    ) : (
-                      <>
-                        <option value="user">User</option>
-                        <option value="author">Author</option>
-                        <option value="admin">Admin</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-              ))
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-xs text-muted">
+                        {member.email || member.user_id}
+                        {isSelf ? " (you)" : ""}
+                      </span>
+                      {member.banned && (
+                        <span className="shrink-0 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400">
+                          suspended
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={member.role}
+                        onChange={(e) =>
+                          updateMemberRole(
+                            member.user_id,
+                            e.target.value as MemberRow["role"],
+                          )
+                        }
+                        disabled={member.is_bootstrap_admin}
+                        className="min-h-8 flex-1 rounded-lg border border-edge-strong bg-field px-2 text-xs text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                        aria-label={`Role for ${member.email || member.user_id}`}
+                      >
+                        {member.is_bootstrap_admin ? (
+                          <option value="admin">Admin</option>
+                        ) : (
+                          <>
+                            <option value="user">User</option>
+                            <option value="author">Author</option>
+                            <option value="admin">Admin</option>
+                          </>
+                        )}
+                      </select>
+                      {!member.is_bootstrap_admin && !isSelf && (
+                        <>
+                          <button
+                            onClick={() => toggleSuspend(member)}
+                            className="min-h-8 shrink-0 rounded-lg border border-edge-strong px-2 text-[11px] text-muted transition hover:text-fg"
+                          >
+                            {member.banned ? "Reinstate" : "Suspend"}
+                          </button>
+                          <button
+                            onClick={() => removeMember(member)}
+                            aria-label={`Remove ${member.email || member.user_id}`}
+                            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-red-500/10 hover:text-red-500"
+                          >
+                            <IconTrash className="h-3.5 w-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </Card>
           {accessMessage && (
@@ -383,6 +448,30 @@ export default function Dashboard({
               <Alert onClose={() => setAccessMessage(null)}>{accessMessage}</Alert>
             </div>
           )}
+        </div>
+      )}
+
+      {canManageRoles && (
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
+            Audit log ({audit.length})
+          </h3>
+          <Card className="max-h-64 space-y-2 overflow-y-auto p-3">
+            {audit.length === 0 ? (
+              <p className="text-xs text-faint">No recorded admin actions yet.</p>
+            ) : (
+              audit.map((e) => (
+                <div key={e.id} className="text-[11px] leading-snug text-muted">
+                  <span className="font-semibold text-fg">{e.action}</span>
+                  {e.detail ? ` · ${e.detail}` : ""}
+                  {e.target_user_id ? ` · ${e.target_user_id.slice(0, 8)}` : ""}
+                  <span className="block text-faint">
+                    {new Date(e.created_at).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </Card>
         </div>
       )}
 

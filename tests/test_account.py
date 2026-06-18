@@ -20,12 +20,13 @@ def _ctx():
 
 
 class _Admin:
-    def __init__(self):
+    def __init__(self, email="u@example.com"):
+        self.email = email
         self.updated = None
         self.signed_out = None
 
     def get_user_by_id(self, uid):
-        return SimpleNamespace(user=SimpleNamespace(id=uid, email="u@example.com"))
+        return SimpleNamespace(user=SimpleNamespace(id=uid, email=self.email))
 
     def update_user_by_id(self, uid, attrs):
         self.updated = (uid, attrs)
@@ -79,12 +80,18 @@ def client():
     main.limiter.enabled = True
 
 
-def _wire(monkeypatch, signin_ok=True, signup_session=False, signup_raises=False):
+def _wire(
+    monkeypatch,
+    signin_ok=True,
+    signup_session=False,
+    signup_raises=False,
+    admin_email="u@example.com",
+):
     """Point service_client + fresh_anon_client at fakes sharing one admin.
 
     Returns (admin, anon_auth) so tests can assert side effects.
     """
-    admin = _Admin()
+    admin = _Admin(admin_email)
     anon_auth = _Auth(admin, signin_ok, signup_session, signup_raises)
     monkeypatch.setattr(main, "service_client", lambda: _Client(_Auth(admin)))
     monkeypatch.setattr(main, "fresh_anon_client", lambda: _Client(anon_auth))
@@ -288,6 +295,70 @@ def test_delete_account_purges_storage_setnull_tables_then_user(monkeypatch):
     assert ("processing_jobs", {"user_id": "u1"}) in store["deleted"]
     # auth user deleted last -> cascades the rest
     assert store["deleted_user"] == "u1"
+
+
+# ---------- suspend / remove member (admin) ----------
+def _admin_override():
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+        "admin1", "o1", "W", role="admin"
+    )
+    main.limiter.enabled = False
+
+
+def test_admin_suspend_member(monkeypatch):
+    _admin_override()
+    admin, _ = _wire(monkeypatch)
+    try:
+        r = TestClient(app).post("/api/members/target1/suspend")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert admin.updated[0] == "target1"
+    assert "ban_duration" in admin.updated[1]
+
+
+def test_admin_remove_member_calls_delete(monkeypatch):
+    _admin_override()
+    called = {}
+    monkeypatch.setattr(main, "delete_account", lambda uid: called.setdefault("uid", uid))
+    _wire(monkeypatch)
+    try:
+        r = TestClient(app).delete("/api/members/target1")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert called["uid"] == "target1"
+
+
+def test_suspend_requires_admin(client, monkeypatch):
+    _wire(monkeypatch)  # client fixture supplies a 'user' role ctx
+    r = client.post("/api/members/target1/suspend")
+    assert r.status_code == 403
+
+
+def test_cannot_suspend_bootstrap_admin(monkeypatch):
+    _admin_override()
+    admin, _ = _wire(monkeypatch, admin_email="rk26.ftw@gmail.com")
+    try:
+        r = TestClient(app).post("/api/members/boss/suspend")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 403
+    assert admin.updated is None  # bootstrap admin never banned
+
+
+def test_admin_action_writes_audit(monkeypatch):
+    _admin_override()
+    events = []
+    monkeypatch.setattr(main, "write_audit", lambda *a, **k: events.append(a))
+    _wire(monkeypatch)
+    try:
+        TestClient(app).post("/api/members/target1/suspend")
+    finally:
+        app.dependency_overrides.clear()
+    assert events
+    assert events[0][2] == "suspend"  # action
+    assert events[0][3] == "target1"  # target user id
 
 
 # ---------- logout all devices ----------
