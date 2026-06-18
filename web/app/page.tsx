@@ -165,6 +165,7 @@ export default function Home() {
   return (
     <Dashboard
       token={session.access_token}
+      refreshToken={session.refresh_token ?? ""}
       onLogout={() => {
         setExpiredMsg(false);
         save(null);

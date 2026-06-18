@@ -9,6 +9,22 @@ export type AuthSession = {
   expires_at?: number | null;
   expires_in?: number | null;
   user_id?: string | null;
+  mfa_required?: boolean;
+  factor_id?: string | null;
+};
+
+export type MfaEnroll = {
+  factor_id: string;
+  qr_code?: string | null;
+  secret?: string | null;
+  uri?: string | null;
+};
+
+export type MfaFactor = {
+  id: string;
+  status?: string | null;
+  friendly_name?: string | null;
+  factor_type?: string | null;
 };
 
 export type ApiResult<T> = {

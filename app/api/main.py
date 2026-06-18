@@ -28,6 +28,7 @@ from app.config import (
     STORAGE_BUCKET,
     SUPPORTED_EXTENSIONS,
 )
+from app.core import mfa
 from app.core.account import delete_account
 from app.core.audit import list_audit, write_audit
 from app.core.corpus import corpus_stats
@@ -78,6 +79,12 @@ def _auth_key(request: Request) -> str:
     if auth.startswith("Bearer "):
         return "tok:" + auth[7:][:48]
     return _client_ip(request)
+
+
+def _bearer(authorization: str | None) -> str:
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.split(" ", 1)[1]
+    return ""
 
 
 limiter = Limiter(key_func=_client_ip)
@@ -173,6 +180,21 @@ class PasswordChangeIn(BaseModel):
 
 class ResendIn(BaseModel):
     email: str
+
+
+class MfaSessionIn(BaseModel):
+    refresh_token: str
+
+
+class MfaVerifyIn(BaseModel):
+    factor_id: str
+    code: str
+    refresh_token: str
+
+
+class MfaUnenrollIn(BaseModel):
+    factor_id: str
+    refresh_token: str
 
 
 def _session_payload(res) -> dict:
@@ -271,16 +293,87 @@ def resend_confirmation(request: Request, body: ResendIn):
     }
 
 
+@api.post("/auth/mfa/enroll")
+@limiter.limit("10/minute", key_func=_auth_key)
+def mfa_enroll(
+    request: Request,
+    body: MfaSessionIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Begin TOTP enrollment. Returns the QR/secret to display once."""
+    try:
+        return mfa.enroll(_bearer(authorization), body.refresh_token)
+    except Exception:
+        raise HTTPException(400, "Could not start MFA enrollment")
+
+
+@api.post("/auth/mfa/verify")
+@limiter.limit("10/minute", key_func=_auth_key)
+def mfa_verify(
+    request: Request,
+    body: MfaVerifyIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Verify a TOTP code — completes enrollment or upgrades a login to AAL2.
+
+    Returns the upgraded session tokens for the SPA to adopt.
+    """
+    try:
+        session = mfa.verify(
+            _bearer(authorization), body.refresh_token, body.factor_id, body.code
+        )
+    except Exception:
+        raise HTTPException(400, "Invalid or expired code")
+    if not session.get("access_token"):
+        raise HTTPException(400, "Invalid or expired code")
+    return session
+
+
+@api.post("/auth/mfa/unenroll")
+def mfa_unenroll(
+    body: MfaUnenrollIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    try:
+        mfa.unenroll(_bearer(authorization), body.refresh_token, body.factor_id)
+    except Exception:
+        raise HTTPException(400, "Could not disable MFA")
+    return {"ok": True}
+
+
+@api.post("/auth/mfa/factors")
+def mfa_factors(
+    body: MfaSessionIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    try:
+        return {"factors": mfa.list_factors(_bearer(authorization), body.refresh_token)}
+    except Exception:
+        return {"factors": []}
+
+
 @api.post("/auth/login")
 @limiter.limit("10/minute")
 def login(request: Request, body: AuthIn):
+    client = fresh_anon_client()
     try:
-        res = fresh_anon_client().auth.sign_in_with_password(
+        res = client.auth.sign_in_with_password(
             {"email": body.email, "password": body.password}
         )
     except Exception:
         raise HTTPException(401, "Invalid credentials")
-    return _session_payload(res)
+    payload = _session_payload(res)
+    # If the account has a verified second factor, signal the SPA to collect a
+    # TOTP code and upgrade the session via /auth/mfa/verify.
+    state = mfa.login_mfa_state(client)
+    if state:
+        payload["mfa_required"] = True
+        payload["factor_id"] = state["factor_id"]
+    return payload
 
 
 @api.post("/auth/refresh")
@@ -858,6 +951,23 @@ def remove_member_endpoint(
 def audit_endpoint(ctx: AuthContext = Depends(get_auth_context)):
     _require_admin(ctx)
     return {"events": list_audit(ctx.organization_id)}
+
+
+@api.post("/members/{member_user_id}/mfa-reset")
+def mfa_reset_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    """Admin recovery: clear a locked-out user's MFA factors."""
+    _require_admin(ctx)
+    try:
+        removed = mfa.admin_reset(member_user_id)
+    except Exception:
+        raise HTTPException(400, "Could not reset MFA for this user")
+    write_audit(
+        ctx.organization_id, ctx.user_id, "mfa_reset", member_user_id,
+        f"removed {removed} factor(s)",
+    )
+    return {"ok": True, "removed": removed}
 
 
 # ---------- memory ----------

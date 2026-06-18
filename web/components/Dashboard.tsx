@@ -49,10 +49,12 @@ function downloadText(filename: string, mimeType: string, content: string) {
 
 export default function Dashboard({
   token,
+  refreshToken,
   onLogout,
   onAuthExpired,
 }: {
   token: string;
+  refreshToken: string;
   onLogout: () => void;
   onAuthExpired: () => void;
 }) {
@@ -148,6 +150,26 @@ export default function Dashboard({
     const r = await call("DELETE", `/members/${member.user_id}`, { token });
     if (r.status === 401) return onAuthExpired();
     if (r.error) return setAccessMessage(r.error);
+    refresh();
+  }
+
+  async function resetMfa(member: MemberRow) {
+    const who = member.email || member.user_id;
+    if (
+      !window.confirm(
+        `Reset 2FA for ${who}? They'll sign in with just their password until they re-enable it.`,
+      )
+    )
+      return;
+    setAccessMessage(null);
+    const r = await call<{ ok: boolean; removed: number }>(
+      "POST",
+      `/members/${member.user_id}/mfa-reset`,
+      { token },
+    );
+    if (r.status === 401) return onAuthExpired();
+    if (r.error) return setAccessMessage(r.error);
+    setAccessMessage(`2FA reset (${r.data?.removed ?? 0} factor(s) removed).`);
     refresh();
   }
 
@@ -397,7 +419,7 @@ export default function Dashboard({
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <select
                         value={member.role}
                         onChange={(e) =>
@@ -427,6 +449,12 @@ export default function Dashboard({
                             className="min-h-8 shrink-0 rounded-lg border border-edge-strong px-2 text-[11px] text-muted transition hover:text-fg"
                           >
                             {member.banned ? "Reinstate" : "Suspend"}
+                          </button>
+                          <button
+                            onClick={() => resetMfa(member)}
+                            className="min-h-8 shrink-0 rounded-lg border border-edge-strong px-2 text-[11px] text-muted transition hover:text-fg"
+                          >
+                            Reset 2FA
                           </button>
                           <button
                             onClick={() => removeMember(member)}
@@ -477,6 +505,7 @@ export default function Dashboard({
 
       <SecurityPanel
         token={token}
+        refreshToken={refreshToken}
         onAuthExpired={onAuthExpired}
         onAccountDeleted={onLogout}
       />

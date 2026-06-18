@@ -372,6 +372,80 @@ def test_logout_all_revokes_global_sessions(client, monkeypatch):
     assert admin.signed_out == ("testtoken", "global")
 
 
+# ---------- MFA (wiring; real TOTP needs live verification) ----------
+def test_mfa_enroll_returns_qr(client, monkeypatch):
+    monkeypatch.setattr(
+        main.mfa,
+        "enroll",
+        lambda at, rt: {"factor_id": "f1", "qr_code": "data:image/svg", "secret": "S", "uri": "otpauth://"},
+    )
+    r = client.post(
+        "/api/auth/mfa/enroll",
+        headers={"Authorization": "Bearer x"},
+        json={"refresh_token": "rt"},
+    )
+    assert r.status_code == 200
+    assert r.json()["factor_id"] == "f1"
+
+
+def test_mfa_verify_returns_upgraded_session(client, monkeypatch):
+    monkeypatch.setattr(
+        main.mfa,
+        "verify",
+        lambda at, rt, fid, code: {"access_token": "aal2", "refresh_token": "r2", "expires_at": 1},
+    )
+    r = client.post(
+        "/api/auth/mfa/verify",
+        headers={"Authorization": "Bearer x"},
+        json={"factor_id": "f1", "code": "123456", "refresh_token": "rt"},
+    )
+    assert r.status_code == 200
+    assert r.json()["access_token"] == "aal2"
+
+
+def test_mfa_verify_rejects_bad_code(client, monkeypatch):
+    monkeypatch.setattr(main.mfa, "verify", lambda *a: {"access_token": None})
+    r = client.post(
+        "/api/auth/mfa/verify",
+        headers={"Authorization": "Bearer x"},
+        json={"factor_id": "f1", "code": "000000", "refresh_token": "rt"},
+    )
+    assert r.status_code == 400
+
+
+def test_login_signals_mfa_required(monkeypatch):
+    app.dependency_overrides.clear()
+    main.limiter.enabled = False
+    _wire(monkeypatch, signin_ok=True)
+    monkeypatch.setattr(main.mfa, "login_mfa_state", lambda client: {"factor_id": "f1"})
+    r = TestClient(app).post(
+        "/api/auth/login", json={"email": "a@b.com", "password": "secret12"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mfa_required"] is True
+    assert body["factor_id"] == "f1"
+
+
+def test_admin_mfa_reset(monkeypatch):
+    _admin_override()
+    monkeypatch.setattr(main.mfa, "admin_reset", lambda uid: 2)
+    events = []
+    monkeypatch.setattr(main, "write_audit", lambda *a, **k: events.append(a))
+    try:
+        r = TestClient(app).post("/api/members/target1/mfa-reset")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert r.json()["removed"] == 2
+    assert events and events[0][2] == "mfa_reset"
+
+
+def test_mfa_reset_requires_admin(client):
+    r = client.post("/api/members/target1/mfa-reset")
+    assert r.status_code == 403
+
+
 # ---------- rate limiting ----------
 def test_login_rate_limited_after_threshold(monkeypatch):
     app.dependency_overrides.clear()

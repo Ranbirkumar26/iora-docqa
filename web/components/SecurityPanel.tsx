@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { call } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { call, MfaEnroll, MfaFactor } from "@/lib/api";
 import { Alert, Card, Field, GhostButton, PrimaryButton } from "@/components/ui";
 
-// Account security: change password (re-auth with current password server-side)
-// and a danger-zone account deletion.
+// Account security: change password, two-factor (TOTP), logout-all, delete.
 export default function SecurityPanel({
   token,
+  refreshToken,
   onAuthExpired,
   onAccountDeleted,
 }: {
   token: string;
+  refreshToken: string;
   onAuthExpired: () => void;
   onAccountDeleted: () => void;
 }) {
@@ -24,10 +25,33 @@ export default function SecurityPanel({
   );
 
   const [loggingOut, setLoggingOut] = useState(false);
+
+  const [factors, setFactors] = useState<MfaFactor[]>([]);
+  const [enroll, setEnroll] = useState<MfaEnroll | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaBusy, setMfaBusy] = useState(false);
+  const [mfaMsg, setMfaMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(
+    null,
+  );
+
   const [showDelete, setShowDelete] = useState(false);
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
+
+  const mfaEnabled = factors.some((f) => f.status === "verified");
+
+  const loadFactors = useCallback(async () => {
+    const r = await call<{ factors: MfaFactor[] }>("POST", "/auth/mfa/factors", {
+      token,
+      json: { refresh_token: refreshToken },
+    });
+    if (r.data) setFactors(r.data.factors);
+  }, [token, refreshToken]);
+
+  useEffect(() => {
+    loadFactors();
+  }, [loadFactors]);
 
   async function changePassword(e: React.FormEvent) {
     e.preventDefault();
@@ -66,6 +90,60 @@ export default function SecurityPanel({
       return setMsg({ kind: "error", text: r.error ?? "Could not sign out everywhere" });
     }
     onAuthExpired(); // current session is now revoked -> force re-login
+  }
+
+  async function startEnroll() {
+    setMfaMsg(null);
+    setMfaBusy(true);
+    const r = await call<MfaEnroll>("POST", "/auth/mfa/enroll", {
+      token,
+      json: { refresh_token: refreshToken },
+    });
+    setMfaBusy(false);
+    if (r.status === 401) return onAuthExpired();
+    if (r.error || !r.data) {
+      return setMfaMsg({ kind: "error", text: r.error ?? "Could not start enrollment" });
+    }
+    setEnroll(r.data);
+    setMfaCode("");
+  }
+
+  async function verifyEnroll(e: React.FormEvent) {
+    e.preventDefault();
+    if (!enroll) return;
+    setMfaMsg(null);
+    setMfaBusy(true);
+    const r = await call<{ access_token?: string }>("POST", "/auth/mfa/verify", {
+      token,
+      json: {
+        factor_id: enroll.factor_id,
+        code: mfaCode.trim(),
+        refresh_token: refreshToken,
+      },
+    });
+    setMfaBusy(false);
+    if (r.status === 401) return onAuthExpired();
+    if (r.error) return setMfaMsg({ kind: "error", text: r.error });
+    setEnroll(null);
+    setMfaCode("");
+    setMfaMsg({ kind: "ok", text: "Two-factor enabled." });
+    loadFactors();
+  }
+
+  async function disableMfa() {
+    const verified = factors.find((f) => f.status === "verified");
+    if (!verified) return;
+    setMfaMsg(null);
+    setMfaBusy(true);
+    const r = await call<{ ok: boolean }>("POST", "/auth/mfa/unenroll", {
+      token,
+      json: { factor_id: verified.id, refresh_token: refreshToken },
+    });
+    setMfaBusy(false);
+    if (r.status === 401) return onAuthExpired();
+    if (r.error) return setMfaMsg({ kind: "error", text: r.error });
+    setMfaMsg({ kind: "ok", text: "Two-factor disabled." });
+    loadFactors();
   }
 
   async function deleteAccount() {
@@ -138,6 +216,91 @@ export default function SecurityPanel({
               {loggingOut ? "Signing out..." : "Log out all devices"}
             </GhostButton>
           </div>
+        </Card>
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
+          Two-factor authentication
+        </h3>
+        <Card className="space-y-3 p-3">
+          {mfaEnabled ? (
+            <>
+              <p className="text-xs text-muted">
+                Two-factor is{" "}
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  on
+                </span>
+                . You&apos;ll enter a code from your authenticator at login.
+              </p>
+              <GhostButton
+                onClick={disableMfa}
+                disabled={mfaBusy}
+                className="!min-h-9 w-full text-xs"
+              >
+                Disable two-factor
+              </GhostButton>
+            </>
+          ) : enroll ? (
+            <form onSubmit={verifyEnroll} className="space-y-2.5">
+              <p className="text-xs leading-relaxed text-muted">
+                Scan the QR (or enter the secret) in your authenticator app, then
+                enter the 6-digit code to confirm.
+              </p>
+              {enroll.qr_code && enroll.qr_code.startsWith("data:") && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={enroll.qr_code}
+                  alt="Two-factor QR code"
+                  className="mx-auto h-40 w-40 rounded bg-white p-1"
+                />
+              )}
+              {enroll.secret && (
+                <code className="block break-all rounded bg-inset px-2 py-1 text-[11px] text-muted">
+                  {enroll.secret}
+                </code>
+              )}
+              <input
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                className="min-h-9 w-full rounded-xl border border-edge-strong bg-field px-3 text-sm text-fg placeholder-faint transition focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <GhostButton
+                  onClick={() => {
+                    setEnroll(null);
+                    setMfaCode("");
+                  }}
+                  className="!min-h-9 text-xs"
+                >
+                  Cancel
+                </GhostButton>
+                <PrimaryButton
+                  type="submit"
+                  loading={mfaBusy}
+                  className="!min-h-9 text-xs"
+                >
+                  Verify &amp; enable
+                </PrimaryButton>
+              </div>
+            </form>
+          ) : (
+            <GhostButton
+              onClick={startEnroll}
+              disabled={mfaBusy}
+              className="!min-h-9 w-full text-xs"
+            >
+              Enable two-factor
+            </GhostButton>
+          )}
+          {mfaMsg && (
+            <Alert kind={mfaMsg.kind} onClose={() => setMfaMsg(null)}>
+              {mfaMsg.text}
+            </Alert>
+          )}
         </Card>
       </div>
 
