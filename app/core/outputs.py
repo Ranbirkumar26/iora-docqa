@@ -432,9 +432,22 @@ def _markdown_table(rows: list[dict], max_rows: int = 25) -> str:
     return "\n".join([header, sep, *body]) + suffix
 
 
+def _excel_safe(value):
+    """Block CSV/Excel formula injection: prefix a leading =, +, -, @ with a quote
+    so spreadsheet apps treat the cell as text, not a formula."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+        return "'" + value
+    return value
+
+
 def build_extraction_artifact(filename: str, text: str) -> tuple[str, bytes, int]:
     rows = _extract_detail_rows(filename, text)
-    df = pd.DataFrame(rows or [{"source_file": filename, "note": "No structured details detected"}])
+    safe_rows = (
+        [{k: _excel_safe(v) for k, v in r.items()} for r in rows]
+        if rows
+        else [{"source_file": filename, "note": "No structured details detected"}]
+    )
+    df = pd.DataFrame(safe_rows)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="extracted_details", index=False)
