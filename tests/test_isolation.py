@@ -152,7 +152,7 @@ def test_search_rpc_is_strictly_user_scoped(monkeypatch):
         def rpc(self, name, args):
             return _Rpc(args)
 
-    monkeypatch.setattr(search_mod, "service_client", lambda: _SearchClient())
+    monkeypatch.setattr(search_mod, "read_client", lambda token=None: _SearchClient())
     try:
         r = TestClient(app).get("/api/search?q=hello")
     finally:

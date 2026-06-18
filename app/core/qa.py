@@ -7,7 +7,7 @@ from app.core.memory import add_memory, detect_remember, memory_block
 from app.core.outputs import save_message
 from app.core.search import reciprocal_rank_fusion, search_chunks
 from app.core.structured import answer_structured, looks_quantitative
-from app.db.client import service_client
+from app.db.client import read_client
 from app.llm.provider import complete
 from app.rag.embed import embed_query
 
@@ -58,6 +58,7 @@ def ask(
     use_org: bool = True,
     persist: bool = True,
     allow_memory_write: bool = True,
+    token: str | None = None,
 ) -> dict:
     # light normalize: trim + collapse whitespace (no autocorrect — would mangle
     # domain terms / proper nouns and hurt retrieval)
@@ -145,7 +146,7 @@ def ask(
     else:
         scope_org = organization_id if use_org else None
         emb = embed_query(question)
-        sb = service_client()
+        sb = read_client(token)  # RLS-scoped to the caller when a token is present
         # semantic retrieval (pgvector)
         vec_rows = (
             sb.rpc(
@@ -164,7 +165,7 @@ def ask(
         # keyword retrieval (FTS), fused with the vector hits so exact terms the
         # embedding misses still surface. Degrades to vector-only when the FTS
         # schema isn't applied (search_chunks returns []).
-        kw_rows = search_chunks(user_id, question, RAG_TOP_K, scope_org)
+        kw_rows = search_chunks(user_id, question, RAG_TOP_K, scope_org, token=token)
         rows = reciprocal_rank_fusion(vec_rows, kw_rows, limit=RAG_TOP_K)
         context = "\n\n".join(
             f"[Source: {r['filename']}]\n{r['content']}" for r in rows

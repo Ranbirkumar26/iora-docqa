@@ -1,4 +1,5 @@
 """FastAPI app. API under /api; serves the built web SPA (web/out) at /."""
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -224,7 +225,8 @@ def get_auth_context(authorization: str = Header(None)) -> AuthContext:
         raise HTTPException(401, "Invalid or expired token")
     if not res or not res.user:
         raise HTTPException(401, "Invalid or expired token")
-    return get_user_org(res.user.id, getattr(res.user, "email", None))
+    ctx = get_user_org(res.user.id, getattr(res.user, "email", None))
+    return replace(ctx, access_token=token)
 
 
 @api.post("/auth/signup")
@@ -660,6 +662,7 @@ def ask_endpoint(
         ctx.read_scope_uses_org,
         persist=not ctx.is_read_only,
         allow_memory_write=not ctx.is_read_only,
+        token=ctx.access_token,
     )
 
 
@@ -683,6 +686,7 @@ def search_endpoint(
         query,
         capped,
         ctx.organization_id if ctx.read_scope_uses_org else None,
+        token=ctx.access_token,
     )
     return {"query": query, "results": results}
 

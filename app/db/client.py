@@ -27,6 +27,23 @@ def service_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
+@lru_cache(maxsize=64)
+def user_client(access_token: str) -> Client:
+    """Client whose PostgREST requests carry the user's JWT, so Postgres RLS
+    applies (queries run as the authenticated user). Cached per token (bounded).
+    """
+    client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    client.postgrest.auth(access_token)
+    return client
+
+
+def read_client(access_token: str | None = None) -> Client:
+    """User-scoped client when a token is given (RLS-enforced reads), else the
+    service client. For SELECT/RPC reads only — writes/admin keep service_client.
+    """
+    return user_client(access_token) if access_token else service_client()
+
+
 def transient_retry(attempts: int = 3, base_delay: float = 0.4):
     """Retry on transient network errors (e.g. httpx ReadError / Errno 35).
 
