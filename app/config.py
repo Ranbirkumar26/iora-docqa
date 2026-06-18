@@ -87,6 +87,7 @@ CHUNK_OVERLAP_CHARS = 400    # ~100 tokens
 # --- upload limits ---
 MAX_FILES_PER_BATCH = 100
 MAX_FILE_SIZE_MB = 10
+MAX_TOTAL_UPLOAD_MB = int(os.getenv("MAX_TOTAL_UPLOAD_MB", "50"))  # cap per request
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".csv", ".xlsx", ".pdf", ".docx"}
 
 # --- storage ---

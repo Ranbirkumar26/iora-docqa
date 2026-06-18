@@ -4,6 +4,7 @@ Indexing is inline (synchronous) for v1 simplicity. For very large batches this
 could be moved to a background worker; noted as future work.
 """
 import hashlib
+import re
 import uuid
 
 from app.config import STORAGE_BUCKET
@@ -94,7 +95,10 @@ def ingest_one(
     file_id = str(uuid.uuid4())
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     scope_id = organization_id if use_org else user_id
-    storage_path = f"{scope_id}/{file_id}/{filename}"
+    # sanitize the filename used in the storage key (strip path separators / null
+    # bytes, cap length); the original filename is kept in the DB for display.
+    safe_name = re.sub(r"[/\\\x00]+", "_", filename).strip()[:200] or "file"
+    storage_path = f"{scope_id}/{file_id}/{safe_name}"
 
     # 2. store raw bytes
     sb.storage.from_(STORAGE_BUCKET).upload(

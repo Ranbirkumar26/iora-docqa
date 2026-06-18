@@ -4,6 +4,7 @@ uvicorn[standard]
 python-multipart
 python-dotenv
 slowapi               # rate limiting (login/signup/reset + ask/upload)
+email-validator       # EmailStr validation
 
 # file parsing
 pandas

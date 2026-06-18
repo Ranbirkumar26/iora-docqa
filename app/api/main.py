@@ -1,4 +1,5 @@
 """FastAPI app. API under /api; serves the built web SPA (web/out) at /."""
+import logging
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -26,6 +27,7 @@ from app.config import (
     CSP_ENFORCE,
     MAX_FILE_SIZE_MB,
     MAX_FILES_PER_BATCH,
+    MAX_TOTAL_UPLOAD_MB,
     STORAGE_BUCKET,
     SUPPORTED_EXTENSIONS,
 )
@@ -156,10 +158,23 @@ def _runtime_error(request: Request, exc: RuntimeError):
     return JSONResponse(status_code=429, content={"detail": str(exc)})
 
 
+logger = logging.getLogger("docqa")
+
+
+@app.exception_handler(Exception)
+def _unhandled(request: Request, exc: Exception):
+    # last resort: log the trace server-side, return a sanitized 500 to the client
+    logger.exception("Unhandled error: %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Something went wrong. Please try again."},
+    )
+
+
 # ---------- auth ----------
 class AuthIn(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
 
 
 class RefreshIn(BaseModel):
@@ -167,7 +182,7 @@ class RefreshIn(BaseModel):
 
 
 class PasswordResetRequestIn(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class PasswordUpdateIn(BaseModel):
@@ -180,7 +195,7 @@ class PasswordChangeIn(BaseModel):
 
 
 class ResendIn(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class MfaSessionIn(BaseModel):
@@ -366,6 +381,8 @@ def login(request: Request, body: AuthIn):
         res = client.auth.sign_in_with_password(
             {"email": body.email, "password": body.password}
         )
+    except httpx.TransportError:
+        raise HTTPException(503, "Auth service temporarily unavailable")
     except Exception:
         raise HTTPException(401, "Invalid credentials")
     payload = _session_payload(res)
@@ -534,10 +551,19 @@ async def upload(
         )
     uploaded, replaced, skipped = [], [], []
     max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+    max_total = MAX_TOTAL_UPLOAD_MB * 1024 * 1024
+    total_bytes = 0
     allowed = ", ".join(sorted(e.lstrip(".") for e in SUPPORTED_EXTENSIONS))
 
     for uf in files:
         data = await uf.read()
+        total_bytes += len(data)
+        if total_bytes > max_total:
+            skipped.append({
+                "filename": uf.filename,
+                "reason": f"batch exceeds {MAX_TOTAL_UPLOAD_MB}MB total; remaining files skipped",
+            })
+            break
         ext = "." + uf.filename.rsplit(".", 1)[-1].lower() if "." in uf.filename else ""
         if len(data) > max_bytes:
             skipped.append({
@@ -630,7 +656,7 @@ def delete_file_endpoint(file_id: str, ctx: AuthContext = Depends(get_auth_conte
 
 # ---------- query ----------
 class AskIn(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=8000)
 
 
 class SummarizeIn(BaseModel):
