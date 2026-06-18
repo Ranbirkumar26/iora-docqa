@@ -30,12 +30,14 @@ from app.config import (
 )
 from app.core.account import delete_account
 from app.core.corpus import corpus_stats
+from app.core.passwords import validate_password
 from app.core.ingest import dedupe_check, delete_file, ingest_one
 from app.core.jobs import create_job, list_jobs, update_job
 from app.core.memory import delete_memory, list_memories
 from app.core.orgs import (
     AuthContext,
     VALID_ROLES,
+    email_domain_allowed,
     get_user_org,
     list_org_members,
     normalize_role,
@@ -212,6 +214,11 @@ def signup(request: Request, body: AuthIn):
     membership is created lazily on the first authenticated request (get_user_org).
     """
     email = (body.email or "").strip().lower()
+    if not email_domain_allowed(email):
+        raise HTTPException(403, "Sign-ups are restricted to approved email domains")
+    pw_err = validate_password(body.password)
+    if pw_err:
+        raise HTTPException(400, pw_err)
     try:
         res = fresh_anon_client().auth.sign_up(
             {
@@ -318,8 +325,9 @@ def update_password(
     not logged or echoed back.
     """
     password = body.password or ""
-    if len(password) < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
+    pw_err = validate_password(password)
+    if pw_err:
+        raise HTTPException(400, pw_err)
     try:
         service_client().auth.admin.update_user_by_id(
             ctx.user_id, {"password": password}
@@ -342,8 +350,9 @@ def change_password(
     user; the new secret is never logged or echoed.
     """
     new_password = body.new_password or ""
-    if len(new_password) < 6:
-        raise HTTPException(400, "New password must be at least 6 characters")
+    pw_err = validate_password(new_password)
+    if pw_err:
+        raise HTTPException(400, pw_err)
     # resolve the caller's email to re-authenticate
     try:
         admin_user = service_client().auth.admin.get_user_by_id(ctx.user_id)
@@ -368,6 +377,27 @@ def change_password(
         )
     except Exception:
         raise HTTPException(400, "Could not update password")
+    return {"ok": True}
+
+
+@api.post("/auth/logout-all")
+def logout_all(
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Revoke all of the caller's sessions across every device.
+
+    Uses the verified bearer token, so it only affects the caller's own account.
+    """
+    token = (
+        authorization.split(" ", 1)[1]
+        if authorization and authorization.startswith("Bearer ")
+        else ""
+    )
+    try:
+        service_client().auth.admin.sign_out(token, "global")
+    except Exception:
+        raise HTTPException(400, "Could not sign out all sessions")
     return {"ok": True}
 
 

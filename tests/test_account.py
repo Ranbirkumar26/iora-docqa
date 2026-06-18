@@ -22,6 +22,7 @@ def _ctx():
 class _Admin:
     def __init__(self):
         self.updated = None
+        self.signed_out = None
 
     def get_user_by_id(self, uid):
         return SimpleNamespace(user=SimpleNamespace(id=uid, email="u@example.com"))
@@ -29,6 +30,9 @@ class _Admin:
     def update_user_by_id(self, uid, attrs):
         self.updated = (uid, attrs)
         return SimpleNamespace(user=SimpleNamespace(id=uid))
+
+    def sign_out(self, jwt, scope="global"):
+        self.signed_out = (jwt, scope)
 
 
 class _Auth:
@@ -122,7 +126,7 @@ def test_change_password_too_short_is_rejected(client, monkeypatch):
 # ---------- signup with email confirmation ----------
 def test_signup_requires_confirmation_when_no_session(client, monkeypatch):
     _wire(monkeypatch, signup_session=False)
-    r = client.post("/api/auth/signup", json={"email": "New@X.com", "password": "secret1"})
+    r = client.post("/api/auth/signup", json={"email": "New@X.com", "password": "secret12"})
     assert r.status_code == 200
     body = r.json()
     assert body["needs_confirmation"] is True
@@ -131,17 +135,45 @@ def test_signup_requires_confirmation_when_no_session(client, monkeypatch):
 
 def test_signup_auto_ok_when_session_returned(client, monkeypatch):
     _wire(monkeypatch, signup_session=True)
-    r = client.post("/api/auth/signup", json={"email": "a@b.com", "password": "secret1"})
+    r = client.post("/api/auth/signup", json={"email": "a@b.com", "password": "secret12"})
     assert r.status_code == 200
     assert r.json()["needs_confirmation"] is False
 
 
 def test_signup_masks_provider_errors_no_enumeration(client, monkeypatch):
     _wire(monkeypatch, signup_raises=True)
-    r = client.post("/api/auth/signup", json={"email": "dup@b.com", "password": "secret1"})
+    r = client.post("/api/auth/signup", json={"email": "dup@b.com", "password": "secret12"})
     # generic success, never reveals the failure / existence
     assert r.status_code == 200
     assert r.json()["needs_confirmation"] is True
+
+
+def test_signup_rejects_weak_password(client, monkeypatch):
+    _wire(monkeypatch)
+    r = client.post("/api/auth/signup", json={"email": "a@b.com", "password": "short"})
+    assert r.status_code == 400  # policy rejects before reaching the provider
+
+
+def test_signup_rejects_disallowed_domain(client, monkeypatch):
+    import app.core.orgs as orgs
+
+    monkeypatch.setattr(orgs, "APP_ALLOWED_EMAIL_DOMAINS", {"company.com"})
+    _wire(monkeypatch)
+    r = client.post(
+        "/api/auth/signup", json={"email": "x@evil.com", "password": "secret12"}
+    )
+    assert r.status_code == 403
+
+
+def test_signup_allows_listed_domain(client, monkeypatch):
+    import app.core.orgs as orgs
+
+    monkeypatch.setattr(orgs, "APP_ALLOWED_EMAIL_DOMAINS", {"company.com"})
+    _wire(monkeypatch)
+    r = client.post(
+        "/api/auth/signup", json={"email": "x@company.com", "password": "secret12"}
+    )
+    assert r.status_code == 200
 
 
 # ---------- resend confirmation ----------
@@ -256,6 +288,17 @@ def test_delete_account_purges_storage_setnull_tables_then_user(monkeypatch):
     assert ("processing_jobs", {"user_id": "u1"}) in store["deleted"]
     # auth user deleted last -> cascades the rest
     assert store["deleted_user"] == "u1"
+
+
+# ---------- logout all devices ----------
+def test_logout_all_revokes_global_sessions(client, monkeypatch):
+    admin, _ = _wire(monkeypatch)
+    r = client.post(
+        "/api/auth/logout-all", headers={"Authorization": "Bearer testtoken"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert admin.signed_out == ("testtoken", "global")
 
 
 # ---------- rate limiting ----------

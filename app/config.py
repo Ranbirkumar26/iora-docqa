@@ -24,6 +24,14 @@ APP_ADMIN_EMAILS = {
 }
 DEFAULT_ORGANIZATION_NAME = os.getenv("DEFAULT_ORGANIZATION_NAME", "iORA Workspace")
 
+# Optional signup allowlist. Empty = open signup. Set to a comma-separated list
+# of domains (e.g. "acme.com,acme.io") to restrict new accounts to those domains.
+APP_ALLOWED_EMAIL_DOMAINS = {
+    d.strip().lower().lstrip("@")
+    for d in os.getenv("APP_ALLOWED_EMAIL_DOMAINS", "").split(",")
+    if d.strip()
+}
+
 # Base URL the password-recovery email link redirects back to. Must be listed
 # in Supabase Auth -> URL Configuration -> Redirect URLs. Override per env
 # (e.g. http://localhost:8000 for local dev).

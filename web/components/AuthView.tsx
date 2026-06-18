@@ -138,12 +138,12 @@ export default function AuthView({
                 label="Password"
                 type="password"
                 required
-                minLength={6}
+                minLength={8}
                 autoComplete={
                   mode === "login" ? "current-password" : "new-password"
                 }
                 placeholder={
-                  mode === "signup" ? "At least 6 characters" : "••••••••"
+                  mode === "signup" ? "8+ chars, letters and numbers" : "••••••••"
                 }
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

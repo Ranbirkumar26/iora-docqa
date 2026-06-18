@@ -1,4 +1,24 @@
-from app.core.orgs import AuthContext, is_bootstrap_admin, normalize_role
+import app.core.orgs as orgs
+from app.core.orgs import (
+    AuthContext,
+    email_domain_allowed,
+    is_bootstrap_admin,
+    normalize_role,
+)
+
+
+def test_email_domain_open_when_no_allowlist(monkeypatch):
+    monkeypatch.setattr(orgs, "APP_ALLOWED_EMAIL_DOMAINS", set())
+    assert email_domain_allowed("anyone@anywhere.com") is True
+
+
+def test_email_domain_allowlist_enforced(monkeypatch):
+    monkeypatch.setattr(orgs, "APP_ALLOWED_EMAIL_DOMAINS", {"acme.com"})
+    assert email_domain_allowed("a@acme.com") is True
+    assert email_domain_allowed("a@ACME.com") is True
+    assert email_domain_allowed("a@evil.com") is False
+    assert email_domain_allowed(None) is False
+    assert email_domain_allowed("noatsign") is False
 
 
 def test_role_aliases_normalize_legacy_values():

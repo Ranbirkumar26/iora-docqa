@@ -7,7 +7,11 @@ from dataclasses import dataclass
 
 from postgrest.exceptions import APIError
 
-from app.config import APP_ADMIN_EMAILS, DEFAULT_ORGANIZATION_NAME
+from app.config import (
+    APP_ADMIN_EMAILS,
+    APP_ALLOWED_EMAIL_DOMAINS,
+    DEFAULT_ORGANIZATION_NAME,
+)
 from app.db.client import service_client, transient_retry
 
 ROLE_ALIASES = {
@@ -75,6 +79,15 @@ def normalize_role(role: str | None) -> str:
 
 def is_bootstrap_admin(email: str | None) -> bool:
     return bool(email and email.strip().lower() in APP_ADMIN_EMAILS)
+
+
+def email_domain_allowed(email: str | None) -> bool:
+    """True when signups are open (no allowlist) or the email's domain is allowed."""
+    if not APP_ALLOWED_EMAIL_DOMAINS:
+        return True
+    if not email or "@" not in email:
+        return False
+    return email.rsplit("@", 1)[-1].strip().lower() in APP_ALLOWED_EMAIL_DOMAINS
 
 
 def _name_from_email(email: str | None) -> str:

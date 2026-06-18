@@ -23,6 +23,7 @@ export default function SecurityPanel({
     null,
   );
 
+  const [loggingOut, setLoggingOut] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -31,8 +32,11 @@ export default function SecurityPanel({
   async function changePassword(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
-    if (next.length < 6) {
-      return setMsg({ kind: "error", text: "New password must be at least 6 characters" });
+    if (next.length < 8) {
+      return setMsg({
+        kind: "error",
+        text: "New password must be at least 8 characters, with letters and numbers",
+      });
     }
     if (next !== confirm) {
       return setMsg({ kind: "error", text: "New passwords do not match" });
@@ -51,6 +55,17 @@ export default function SecurityPanel({
     setCurrent("");
     setNext("");
     setConfirm("");
+  }
+
+  async function logoutAll() {
+    setLoggingOut(true);
+    const r = await call<{ ok: boolean }>("POST", "/auth/logout-all", { token });
+    setLoggingOut(false);
+    if (r.status === 401) return onAuthExpired();
+    if (r.error || !r.data?.ok) {
+      return setMsg({ kind: "error", text: r.error ?? "Could not sign out everywhere" });
+    }
+    onAuthExpired(); // current session is now revoked -> force re-login
   }
 
   async function deleteAccount() {
@@ -84,9 +99,9 @@ export default function SecurityPanel({
             <Field
               label="New password"
               type="password"
-              minLength={6}
+              minLength={8}
               autoComplete="new-password"
-              placeholder="At least 6 characters"
+              placeholder="8+ chars, letters and numbers"
               value={next}
               onChange={(e) => setNext(e.target.value)}
               required
@@ -94,7 +109,7 @@ export default function SecurityPanel({
             <Field
               label="Confirm new password"
               type="password"
-              minLength={6}
+              minLength={8}
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
@@ -114,6 +129,15 @@ export default function SecurityPanel({
               Change password
             </PrimaryButton>
           </form>
+          <div className="mt-3 border-t border-edge pt-3">
+            <GhostButton
+              onClick={logoutAll}
+              disabled={loggingOut}
+              className="!min-h-9 w-full text-xs"
+            >
+              {loggingOut ? "Signing out..." : "Log out all devices"}
+            </GhostButton>
+          </div>
         </Card>
       </div>
 
