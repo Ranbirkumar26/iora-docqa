@@ -29,6 +29,10 @@ DEFAULT_ORGANIZATION_NAME = os.getenv("DEFAULT_ORGANIZATION_NAME", "iORA Workspa
 # (e.g. http://localhost:8000 for local dev).
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://iora-docqa-copy-production.up.railway.app")
 
+# Content-Security-Policy ships report-only by default so it cannot break the
+# SPA; set CSP_ENFORCE=true once violation reports look clean to enforce it.
+CSP_ENFORCE = os.getenv("CSP_ENFORCE", "").strip().lower() in {"1", "true", "yes", "on"}
+
 # --- LLM fallback chain ---
 # Ordered, comma-separated provider names. First is the everyday primary; each
 # next is tried when the previous is rate-limited. Providers without a key set

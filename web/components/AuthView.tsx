@@ -42,13 +42,25 @@ export default function AuthView({
     }
 
     if (mode === "signup") {
-      const r = await call<{ user_id: string }>("POST", "/auth/signup", {
-        json: { email, password },
-      });
+      const r = await call<{ needs_confirmation?: boolean; message?: string }>(
+        "POST",
+        "/auth/signup",
+        { json: { email, password } },
+      );
       setBusy(false);
       if (r.error) return setError(r.error);
+      // Unless the backend says confirmation is NOT required, do not auto-login.
+      if (r.data?.needs_confirmation !== false) {
+        setMode("login");
+        setPassword("");
+        setNotice(
+          r.data?.message ??
+            "Check your email to confirm your account, then log in.",
+        );
+        return;
+      }
       setNotice("Account created. Logging you in...");
-      // fall through to login with same credentials
+      // confirmation disabled -> fall through to login with same credentials
     }
 
     const r = await call<AuthSession>("POST", "/auth/login", {
@@ -57,6 +69,21 @@ export default function AuthView({
     setBusy(false);
     if (r.error || !r.data) return setError(r.error ?? "Login failed");
     onSession(r.data);
+  }
+
+  async function resendConfirmation() {
+    if (!email) return setError("Enter your email first");
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+    const r = await call<{ message?: string }>("POST", "/auth/resend", {
+      json: { email },
+    });
+    setBusy(false);
+    setNotice(
+      r.data?.message ??
+        "If that account needs confirmation, a new email is on its way.",
+    );
   }
 
   return (
@@ -143,17 +170,27 @@ export default function AuthView({
           </form>
 
           {mode === "login" && (
-            <button
-              type="button"
-              onClick={() => {
-                setMode("reset");
-                setError(null);
-                setNotice(null);
-              }}
-              className="mt-4 w-full text-center text-xs font-medium text-faint transition hover:text-fg"
-            >
-              Forgot password?
-            </button>
+            <div className="mt-4 flex flex-col items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("reset");
+                  setError(null);
+                  setNotice(null);
+                }}
+                className="text-xs font-medium text-faint transition hover:text-fg"
+              >
+                Forgot password?
+              </button>
+              <button
+                type="button"
+                onClick={resendConfirmation}
+                disabled={busy}
+                className="text-xs font-medium text-faint transition hover:text-fg disabled:opacity-50"
+              >
+                Resend confirmation email
+              </button>
+            </div>
           )}
           {mode === "reset" && (
             <button

@@ -20,6 +20,7 @@ import AskPanel from "@/components/AskPanel";
 import SearchPanel from "@/components/SearchPanel";
 import SummarizePanel from "@/components/SummarizePanel";
 import ReportPanel from "@/components/ReportPanel";
+import SecurityPanel from "@/components/SecurityPanel";
 
 type Tab = "ask" | "search" | "summarize" | "report" | "files";
 
@@ -384,6 +385,12 @@ export default function Dashboard({
           )}
         </div>
       )}
+
+      <SecurityPanel
+        token={token}
+        onAuthExpired={onAuthExpired}
+        onAccountDeleted={onLogout}
+      />
 
       <div>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
