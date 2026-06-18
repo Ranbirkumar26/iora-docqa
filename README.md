@@ -95,6 +95,35 @@ Admins can manage roles from the dashboard Access Control panel. The API also ex
 Only emails listed in `APP_ADMIN_EMAILS` become admin automatically. Everyone
 else is created as `user`, then can be promoted by an admin.
 
+## Account & security
+
+Self-service account management and hardening. Roles aside, all data stays per-account;
+admins manage members but never see other users' documents.
+
+- **Sign-up verification** — new accounts confirm via an emailed link before first login;
+  `POST /api/auth/resend` re-sends it. (Needs Supabase "Confirm email" + SMTP.)
+- **Password reset** — "Forgot password?" emails a recovery link; the user sets a new
+  password in-app (`/api/auth/request-password-reset`, `/api/auth/update-password`).
+- **Change password** — `POST /api/auth/change-password` re-authenticates the current
+  password before changing it.
+- **Password policy** — minimum 8 characters with a letter and a number, enforced on
+  sign-up, change, and reset.
+- **Two-factor (TOTP)** — optional per user: enable in the Security panel (scan QR / enter
+  secret → verify), prompted for a 6-digit code at login. Admins can reset a locked-out
+  user's MFA. (`/api/auth/mfa/{enroll,verify,unenroll,factors}`; needs TOTP enabled in Supabase Auth.)
+- **Log out everywhere** — `POST /api/auth/logout-all` revokes all of the caller's sessions.
+- **Delete account** — `DELETE /api/account` permanently removes the account and all its
+  data (storage, files, chunks, outputs, conversation, memory).
+- **Rate limiting** — login / sign-up / reset / resend (per IP), ask / upload (per token).
+- **Security headers** — HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy;
+  CSP ships report-only (set `CSP_ENFORCE=true` to enforce).
+- **Sign-up allowlist** — set `APP_ALLOWED_EMAIL_DOMAINS` to restrict new accounts to
+  approved domains (empty = open sign-up).
+
+Admin tools (Access Control panel): change member roles, suspend / reinstate / remove a
+member, reset a member's MFA. Privileged actions are recorded in an audit log
+(`GET /api/audit`). Bootstrap admins (`APP_ADMIN_EMAILS`) can't be suspended, removed, or demoted.
+
 ## LLM fallback chain
 
 `LLM_CHAIN` is an ordered, comma-separated list (default `groq,gemini,qwen`). The first is
@@ -130,9 +159,12 @@ Reorder anytime with the `LLM_CHAIN` env var, no code change.
    `SUPABASE_SERVICE_KEY`, plus at least one LLM key (`GROQ_API_KEY`, `GEMINI_API_KEY`,
    `QWEN_API_KEY`). Gemini is required for embeddings. Missing LLM keys are skipped in the chain.
    Set `APP_ADMIN_EMAILS` to the comma-separated list of bootstrap admin emails.
-   Set `APP_BASE_URL` to where the app is served (the password-reset email links back to
-   it). Password reset needs Supabase SMTP enabled (Auth -> Settings) and `APP_BASE_URL`
-   added under Auth -> URL Configuration -> Redirect URLs.
+   Set `APP_BASE_URL` to where the app is served (password-reset and confirmation emails
+   link back to it). Email flows need Supabase SMTP enabled with "Confirm email" ON
+   (Auth -> Settings) and `APP_BASE_URL` added under Auth -> URL Configuration ->
+   Redirect URLs. Enable TOTP under Auth -> Multi-Factor for two-factor. Optional:
+   `APP_ALLOWED_EMAIL_DOMAINS` (restrict sign-ups), `CSP_ENFORCE=true` (enforce CSP
+   instead of report-only).
 2. Apply `app/db/schema.sql` in the Supabase SQL editor; create a private storage
    bucket named `user-documents`. Re-run the schema after updates; it includes
    idempotent `alter table ... add column if not exists` and backfill SQL for
