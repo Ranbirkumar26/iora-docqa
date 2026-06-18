@@ -8,7 +8,7 @@ consumers:
 """
 import re
 
-from app.db.client import service_client, transient_retry
+from app.db.client import read_client, transient_retry
 
 FTS_TOP_K = 15
 # RRF constant from Cormack et al. 2009. Large enough that no single list
@@ -41,6 +41,7 @@ def search_chunks(
     query: str,
     limit: int = FTS_TOP_K,
     organization_id: str | None = None,
+    token: str | None = None,
 ) -> list[dict]:
     """Ranked keyword matches for a user.
 
@@ -51,7 +52,7 @@ def search_chunks(
         return []
     try:
         return (
-            service_client()
+            read_client(token)
             .rpc(
                 "search_chunks",
                 {

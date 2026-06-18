@@ -31,6 +31,7 @@ class AuthContext:
     organization_name: str
     role: str = "user"
     org_enabled: bool = True
+    access_token: str | None = None  # caller's JWT, for RLS-scoped reads
 
     @property
     def scope_id(self) -> str:
