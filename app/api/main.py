@@ -16,23 +16,32 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app.config import (
     APP_BASE_URL,
+    CSP_ENFORCE,
     MAX_FILE_SIZE_MB,
     MAX_FILES_PER_BATCH,
     STORAGE_BUCKET,
     SUPPORTED_EXTENSIONS,
 )
+from app.core import mfa
+from app.core.account import delete_account
+from app.core.audit import list_audit, write_audit
 from app.core.corpus import corpus_stats
+from app.core.passwords import validate_password
 from app.core.ingest import dedupe_check, delete_file, ingest_one
 from app.core.jobs import create_job, list_jobs, update_job
 from app.core.memory import delete_memory, list_memories
 from app.core.orgs import (
     AuthContext,
     VALID_ROLES,
-    create_personal_org,
+    email_domain_allowed,
     get_user_org,
+    is_bootstrap_admin,
     list_org_members,
     normalize_role,
     set_org_member_role,
@@ -54,6 +63,67 @@ from app.db.client import anon_client, fresh_anon_client, service_client
 
 app = FastAPI(title="DocQA")
 api = APIRouter(prefix="/api")
+
+
+def _client_ip(request: Request) -> str:
+    """Real client IP, honouring the proxy's X-Forwarded-For (Railway terminates TLS)."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+def _auth_key(request: Request) -> str:
+    """Rate-limit key for authenticated routes: per bearer token, else per IP."""
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        return "tok:" + auth[7:][:48]
+    return _client_ip(request)
+
+
+def _bearer(authorization: str | None) -> str:
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.split(" ", 1)[1]
+    return ""
+
+
+limiter = Limiter(key_func=_client_ip)
+app.state.limiter = limiter
+
+
+def _rate_limited(request: Request, exc: RateLimitExceeded):
+    # match the API's {"detail": ...} shape so the SPA shows a clean message
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please slow down and try again shortly."},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limited)
+
+
+_CSP = (
+    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; "
+    "img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+    )
+    # report-only by default (CSP_ENFORCE=false) so it can't break the SPA
+    csp_header = (
+        "Content-Security-Policy" if CSP_ENFORCE else "Content-Security-Policy-Report-Only"
+    )
+    response.headers.setdefault(csp_header, _CSP)
+    return response
 
 
 def _scope_column(ctx: AuthContext) -> str:
@@ -103,6 +173,30 @@ class PasswordUpdateIn(BaseModel):
     password: str
 
 
+class PasswordChangeIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class ResendIn(BaseModel):
+    email: str
+
+
+class MfaSessionIn(BaseModel):
+    refresh_token: str
+
+
+class MfaVerifyIn(BaseModel):
+    factor_id: str
+    code: str
+    refresh_token: str
+
+
+class MfaUnenrollIn(BaseModel):
+    factor_id: str
+    refresh_token: str
+
+
 def _session_payload(res) -> dict:
     session = getattr(res, "session", None)
     user = getattr(res, "user", None)
@@ -134,31 +228,152 @@ def get_auth_context(authorization: str = Header(None)) -> AuthContext:
 
 
 @api.post("/auth/signup")
-def signup(body: AuthIn):
-    # admin create -> email pre-confirmed, no email round-trip needed for demo
+@limiter.limit("5/minute")
+def signup(request: Request, body: AuthIn):
+    """Create an account and send a confirmation email.
+
+    Uses the public sign-up flow so Supabase emails a verification link; with
+    "Confirm email" enabled the user must verify before logging in. The response
+    is generic and never reveals whether an email already has an account. The org
+    membership is created lazily on the first authenticated request (get_user_org).
+    """
+    email = (body.email or "").strip().lower()
+    if not email_domain_allowed(email):
+        raise HTTPException(403, "Sign-ups are restricted to approved email domains")
+    pw_err = validate_password(body.password)
+    if pw_err:
+        raise HTTPException(400, pw_err)
     try:
-        res = service_client().auth.admin.create_user(
-            {"email": body.email, "password": body.password, "email_confirm": True}
+        res = fresh_anon_client().auth.sign_up(
+            {
+                "email": email,
+                "password": body.password,
+                "options": {"email_redirect_to": APP_BASE_URL},
+            }
         )
-        org = create_personal_org(res.user.id, body.email)
-    except Exception as e:
-        raise HTTPException(400, f"Signup failed: {e}")
+    except Exception:
+        # don't leak existence or provider error detail
+        return {
+            "needs_confirmation": True,
+            "message": "Check your email to confirm your account, then log in.",
+        }
+    session = getattr(res, "session", None)
+    user = getattr(res, "user", None)
+    needs_confirmation = session is None
     return {
-        "user_id": res.user.id,
-        "organization_id": org.organization_id,
-        "message": "Account created. Now log in.",
+        "user_id": getattr(user, "id", None),
+        "needs_confirmation": needs_confirmation,
+        "message": (
+            "Check your email to confirm your account, then log in."
+            if needs_confirmation
+            else "Account created. You can log in now."
+        ),
     }
 
 
-@api.post("/auth/login")
-def login(body: AuthIn):
+@api.post("/auth/resend")
+@limiter.limit("5/minute")
+def resend_confirmation(request: Request, body: ResendIn):
+    """Re-send the signup confirmation email. Generic response (no enumeration)."""
+    email = (body.email or "").strip().lower()
+    if email:
+        try:
+            fresh_anon_client().auth.resend(
+                {
+                    "type": "signup",
+                    "email": email,
+                    "options": {"email_redirect_to": APP_BASE_URL},
+                }
+            )
+        except Exception:
+            pass
+    return {
+        "ok": True,
+        "message": "If that account needs confirmation, a new email is on its way.",
+    }
+
+
+@api.post("/auth/mfa/enroll")
+@limiter.limit("10/minute", key_func=_auth_key)
+def mfa_enroll(
+    request: Request,
+    body: MfaSessionIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Begin TOTP enrollment. Returns the QR/secret to display once."""
     try:
-        res = fresh_anon_client().auth.sign_in_with_password(
+        return mfa.enroll(_bearer(authorization), body.refresh_token)
+    except Exception:
+        raise HTTPException(400, "Could not start MFA enrollment")
+
+
+@api.post("/auth/mfa/verify")
+@limiter.limit("10/minute", key_func=_auth_key)
+def mfa_verify(
+    request: Request,
+    body: MfaVerifyIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Verify a TOTP code — completes enrollment or upgrades a login to AAL2.
+
+    Returns the upgraded session tokens for the SPA to adopt.
+    """
+    try:
+        session = mfa.verify(
+            _bearer(authorization), body.refresh_token, body.factor_id, body.code
+        )
+    except Exception:
+        raise HTTPException(400, "Invalid or expired code")
+    if not session.get("access_token"):
+        raise HTTPException(400, "Invalid or expired code")
+    return session
+
+
+@api.post("/auth/mfa/unenroll")
+def mfa_unenroll(
+    body: MfaUnenrollIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    try:
+        mfa.unenroll(_bearer(authorization), body.refresh_token, body.factor_id)
+    except Exception:
+        raise HTTPException(400, "Could not disable MFA")
+    return {"ok": True}
+
+
+@api.post("/auth/mfa/factors")
+def mfa_factors(
+    body: MfaSessionIn,
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    try:
+        return {"factors": mfa.list_factors(_bearer(authorization), body.refresh_token)}
+    except Exception:
+        return {"factors": []}
+
+
+@api.post("/auth/login")
+@limiter.limit("10/minute")
+def login(request: Request, body: AuthIn):
+    client = fresh_anon_client()
+    try:
+        res = client.auth.sign_in_with_password(
             {"email": body.email, "password": body.password}
         )
     except Exception:
         raise HTTPException(401, "Invalid credentials")
-    return _session_payload(res)
+    payload = _session_payload(res)
+    # If the account has a verified second factor, signal the SPA to collect a
+    # TOTP code and upgrade the session via /auth/mfa/verify.
+    state = mfa.login_mfa_state(client)
+    if state:
+        payload["mfa_required"] = True
+        payload["factor_id"] = state["factor_id"]
+    return payload
 
 
 @api.post("/auth/refresh")
@@ -173,7 +388,8 @@ def refresh(body: RefreshIn):
 
 
 @api.post("/auth/request-password-reset")
-def request_password_reset(body: PasswordResetRequestIn):
+@limiter.limit("5/minute")
+def request_password_reset(request: Request, body: PasswordResetRequestIn):
     """Ask Supabase to email a recovery link to the address.
 
     Always returns the same generic response, so the endpoint cannot be used to
@@ -204,8 +420,9 @@ def update_password(
     not logged or echoed back.
     """
     password = body.password or ""
-    if len(password) < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
+    pw_err = validate_password(password)
+    if pw_err:
+        raise HTTPException(400, pw_err)
     try:
         service_client().auth.admin.update_user_by_id(
             ctx.user_id, {"password": password}
@@ -217,10 +434,89 @@ def update_password(
     return {"ok": True}
 
 
+@api.post("/auth/change-password")
+def change_password(
+    body: PasswordChangeIn, ctx: AuthContext = Depends(get_auth_context)
+):
+    """Change password for a logged-in user.
+
+    Re-authenticates with the CURRENT password first, so a stolen session token
+    alone cannot silently re-key the account. Account is the verified token's
+    user; the new secret is never logged or echoed.
+    """
+    new_password = body.new_password or ""
+    pw_err = validate_password(new_password)
+    if pw_err:
+        raise HTTPException(400, pw_err)
+    # resolve the caller's email to re-authenticate
+    try:
+        admin_user = service_client().auth.admin.get_user_by_id(ctx.user_id)
+        email = getattr(getattr(admin_user, "user", None), "email", None)
+    except Exception:
+        email = None
+    if not email:
+        raise HTTPException(400, "Could not verify this account")
+    # verify the current password
+    try:
+        res = fresh_anon_client().auth.sign_in_with_password(
+            {"email": email, "password": body.current_password or ""}
+        )
+        if not getattr(res, "session", None):
+            raise ValueError("no session")
+    except Exception:
+        raise HTTPException(403, "Current password is incorrect")
+    # set the new password
+    try:
+        service_client().auth.admin.update_user_by_id(
+            ctx.user_id, {"password": new_password}
+        )
+    except Exception:
+        raise HTTPException(400, "Could not update password")
+    return {"ok": True}
+
+
+@api.post("/auth/logout-all")
+def logout_all(
+    authorization: str = Header(None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Revoke all of the caller's sessions across every device.
+
+    Uses the verified bearer token, so it only affects the caller's own account.
+    """
+    token = (
+        authorization.split(" ", 1)[1]
+        if authorization and authorization.startswith("Bearer ")
+        else ""
+    )
+    try:
+        service_client().auth.admin.sign_out(token, "global")
+    except Exception:
+        raise HTTPException(400, "Could not sign out all sessions")
+    return {"ok": True}
+
+
+@api.delete("/account")
+def delete_account_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    """Permanently delete the caller's account and all their data. Irreversible.
+
+    Scoped to the verified token's user, so it can only ever delete the caller's
+    own account — never another user's.
+    """
+    try:
+        delete_account(ctx.user_id)
+    except Exception:
+        raise HTTPException(500, "Could not fully delete the account. Please try again.")
+    return {"deleted": True}
+
+
 # ---------- files ----------
 @api.post("/upload")
+@limiter.limit("20/minute", key_func=_auth_key)
 async def upload(
-    files: list[UploadFile] = File(...), ctx: AuthContext = Depends(get_auth_context)
+    request: Request,
+    files: list[UploadFile] = File(...),
+    ctx: AuthContext = Depends(get_auth_context),
 ):
     _require_can_upload(ctx)
     if len(files) > MAX_FILES_PER_BATCH:
@@ -353,7 +649,10 @@ class MemberRoleIn(BaseModel):
 
 
 @api.post("/ask")
-def ask_endpoint(body: AskIn, ctx: AuthContext = Depends(get_auth_context)):
+@limiter.limit("30/minute", key_func=_auth_key)
+def ask_endpoint(
+    request: Request, body: AskIn, ctx: AuthContext = Depends(get_auth_context)
+):
     return ask(
         ctx.user_id,
         ctx.organization_id,
@@ -586,7 +885,89 @@ def update_member_role_endpoint(
         raise HTTPException(400, str(exc))
     if not saved:
         raise HTTPException(404, "Member not found")
+    write_audit(
+        ctx.organization_id, ctx.user_id, "role_change", member_user_id,
+        f"role set to {role}",
+    )
     return {"member": {**saved, "role": normalize_role(saved.get("role"))}}
+
+
+def _is_bootstrap_member(user_id: str) -> bool:
+    try:
+        res = service_client().auth.admin.get_user_by_id(user_id)
+        return is_bootstrap_admin(getattr(getattr(res, "user", None), "email", None))
+    except Exception:
+        return False
+
+
+@api.post("/members/{member_user_id}/suspend")
+def suspend_member_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    _require_admin(ctx)
+    if _is_bootstrap_member(member_user_id):
+        raise HTTPException(403, "Cannot suspend a bootstrap admin")
+    try:
+        service_client().auth.admin.update_user_by_id(
+            member_user_id, {"ban_duration": "876000h"}
+        )
+    except Exception:
+        raise HTTPException(400, "Could not suspend user")
+    write_audit(ctx.organization_id, ctx.user_id, "suspend", member_user_id)
+    return {"suspended": member_user_id}
+
+
+@api.post("/members/{member_user_id}/unsuspend")
+def unsuspend_member_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    _require_admin(ctx)
+    try:
+        service_client().auth.admin.update_user_by_id(
+            member_user_id, {"ban_duration": "none"}
+        )
+    except Exception:
+        raise HTTPException(400, "Could not reinstate user")
+    write_audit(ctx.organization_id, ctx.user_id, "unsuspend", member_user_id)
+    return {"unsuspended": member_user_id}
+
+
+@api.delete("/members/{member_user_id}")
+def remove_member_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    _require_admin(ctx)
+    if _is_bootstrap_member(member_user_id):
+        raise HTTPException(403, "Cannot remove a bootstrap admin")
+    try:
+        delete_account(member_user_id)
+    except Exception:
+        raise HTTPException(500, "Could not remove user")
+    write_audit(ctx.organization_id, ctx.user_id, "remove", member_user_id)
+    return {"removed": member_user_id}
+
+
+@api.get("/audit")
+def audit_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    _require_admin(ctx)
+    return {"events": list_audit(ctx.organization_id)}
+
+
+@api.post("/members/{member_user_id}/mfa-reset")
+def mfa_reset_endpoint(
+    member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
+):
+    """Admin recovery: clear a locked-out user's MFA factors."""
+    _require_admin(ctx)
+    try:
+        removed = mfa.admin_reset(member_user_id)
+    except Exception:
+        raise HTTPException(400, "Could not reset MFA for this user")
+    write_audit(
+        ctx.organization_id, ctx.user_id, "mfa_reset", member_user_id,
+        f"removed {removed} factor(s)",
+    )
+    return {"ok": True, "removed": removed}
 
 
 # ---------- memory ----------

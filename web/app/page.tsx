@@ -42,24 +42,6 @@ export default function Home() {
     setReady(true);
   }, []);
 
-  // Supabase recovery links land here with the session in the URL hash. Capture
-  // the token, then strip it from the address bar / history so it isn't left
-  // lying around.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hash = window.location.hash;
-    if (hash.includes("type=recovery")) {
-      const params = new URLSearchParams(hash.replace(/^#/, ""));
-      const tok = params.get("access_token");
-      if (tok) setRecoveryToken(tok);
-      window.history.replaceState(
-        null,
-        "",
-        window.location.pathname + window.location.search,
-      );
-    }
-  }, []);
-
   const save = useCallback((next: AuthSession | null) => {
     sessionRef.current = next;
     if (next?.access_token) {
@@ -72,6 +54,37 @@ export default function Home() {
     }
     setSession(next);
   }, []);
+
+  // Supabase auth links (recovery / email confirmation) land here with the
+  // session in the URL hash. Capture it, then strip it from the address bar /
+  // history so the token isn't left lying around. Placed after `save` so a
+  // confirmation link can establish a session.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (!hash.includes("access_token")) return;
+    const params = new URLSearchParams(hash.replace(/^#/, ""));
+    const accessToken = params.get("access_token");
+    const type = params.get("type");
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + window.location.search,
+    );
+    if (!accessToken) return;
+    if (type === "recovery") {
+      setRecoveryToken(accessToken);
+      return;
+    }
+    // email confirmation / magic link -> establish a logged-in session
+    const expiresAt = params.get("expires_at");
+    save({
+      access_token: accessToken,
+      refresh_token: params.get("refresh_token"),
+      expires_at: expiresAt ? Number(expiresAt) : null,
+    });
+    setAuthNotice("Email confirmed — you're logged in.");
+  }, [save]);
 
   const authExpired = useCallback(() => {
     save(null);
@@ -152,6 +165,7 @@ export default function Home() {
   return (
     <Dashboard
       token={session.access_token}
+      refreshToken={session.refresh_token ?? ""}
       onLogout={() => {
         setExpiredMsg(false);
         save(null);

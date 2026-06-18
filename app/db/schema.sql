@@ -137,6 +137,19 @@ create table if not exists memories (
     created_at  timestamptz not null default now()
 );
 
+-- admin audit log: privileged actions (role change, suspend, reinstate, remove)
+create table if not exists audit_events (
+    id              uuid primary key default gen_random_uuid(),
+    organization_id uuid references organizations(id) on delete cascade,
+    actor_user_id   uuid references auth.users(id) on delete set null,
+    actor_email     text,
+    action          text not null,
+    target_user_id  uuid,
+    target_email    text,
+    detail          text,
+    created_at      timestamptz not null default now()
+);
+
 create index if not exists idx_files_user on files(user_id);
 create index if not exists idx_org_members_user_role on organization_members(user_id, role);
 create index if not exists idx_files_user_hash on files(user_id, content_hash);
@@ -156,6 +169,7 @@ create index if not exists idx_outputs_file_kind on generated_outputs(file_id, k
 create index if not exists idx_organizations_created_by on organizations(created_by);
 create index if not exists idx_reports_user on reports(user_id);
 create index if not exists idx_jobs_user on processing_jobs(user_id);
+create index if not exists idx_audit_org_created on audit_events(organization_id, created_at desc);
 
 -- Backfill existing users/rows when this schema is applied to an older project.
 -- All users join the shared workspace. Only the bootstrap admin email is
@@ -233,6 +247,7 @@ alter table conversation_messages enable row level security;
 alter table generated_outputs enable row level security;
 alter table processing_jobs enable row level security;
 alter table memories enable row level security;
+alter table audit_events enable row level security;
 
 drop policy if exists orgs_member_select on organizations;
 create policy orgs_member_select on organizations
@@ -393,6 +408,19 @@ create policy memories_owner on memories
     for all
     using (user_id = (select auth.uid()))
     with check (user_id = (select auth.uid()));
+
+-- audit log: members of the org may read it (admin-only is enforced in the API);
+-- inserts happen via the service role only.
+drop policy if exists audit_member_select on audit_events;
+create policy audit_member_select on audit_events
+    for select
+    to authenticated
+    using (
+        organization_id in (
+            select organization_id from organization_members
+            where user_id = (select auth.uid())
+        )
+    );
 
 -- ===== Vector search RPC: top-k chunks for a user =====
 -- Called from backend. If p_organization_id is null, filters strictly by

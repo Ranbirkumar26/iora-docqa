@@ -24,8 +24,10 @@ export default function ResetPasswordView({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (password.length < 6) {
-      return setError("Password must be at least 6 characters");
+    if (password.length < 8) {
+      return setError(
+        "Password must be at least 8 characters, with letters and numbers",
+      );
     }
     if (password !== confirm) {
       return setError("Passwords do not match");
@@ -62,9 +64,9 @@ export default function ResetPasswordView({
               label="New password"
               type="password"
               required
-              minLength={6}
+              minLength={8}
               autoComplete="new-password"
-              placeholder="At least 6 characters"
+              placeholder="8+ chars, letters and numbers"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -72,7 +74,7 @@ export default function ResetPasswordView({
               label="Confirm new password"
               type="password"
               required
-              minLength={6}
+              minLength={8}
               autoComplete="new-password"
               placeholder="Re-enter the password"
               value={confirm}

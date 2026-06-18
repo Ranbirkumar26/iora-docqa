@@ -9,6 +9,22 @@ export type AuthSession = {
   expires_at?: number | null;
   expires_in?: number | null;
   user_id?: string | null;
+  mfa_required?: boolean;
+  factor_id?: string | null;
+};
+
+export type MfaEnroll = {
+  factor_id: string;
+  qr_code?: string | null;
+  secret?: string | null;
+  uri?: string | null;
+};
+
+export type MfaFactor = {
+  id: string;
+  status?: string | null;
+  friendly_name?: string | null;
+  factor_type?: string | null;
 };
 
 export type ApiResult<T> = {
@@ -194,6 +210,7 @@ export type MemberRow = {
   email?: string | null;
   role: "user" | "author" | "admin";
   is_bootstrap_admin?: boolean;
+  banned?: boolean;
   created_at: string;
 };
 
@@ -222,6 +239,15 @@ export type ReportRow = {
   report: string;
   mode: "direct" | "rag" | "none";
   sources: string[];
+  created_at: string;
+};
+
+export type AuditEvent = {
+  id: string;
+  actor_user_id?: string | null;
+  action: string;
+  target_user_id?: string | null;
+  detail?: string | null;
   created_at: string;
 };
 

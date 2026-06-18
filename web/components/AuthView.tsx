@@ -19,6 +19,11 @@ export default function AuthView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [mfaStep, setMfaStep] = useState<{
+    factorId: string;
+    session: AuthSession;
+  } | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,13 +47,25 @@ export default function AuthView({
     }
 
     if (mode === "signup") {
-      const r = await call<{ user_id: string }>("POST", "/auth/signup", {
-        json: { email, password },
-      });
+      const r = await call<{ needs_confirmation?: boolean; message?: string }>(
+        "POST",
+        "/auth/signup",
+        { json: { email, password } },
+      );
       setBusy(false);
       if (r.error) return setError(r.error);
+      // Unless the backend says confirmation is NOT required, do not auto-login.
+      if (r.data?.needs_confirmation !== false) {
+        setMode("login");
+        setPassword("");
+        setNotice(
+          r.data?.message ??
+            "Check your email to confirm your account, then log in.",
+        );
+        return;
+      }
       setNotice("Account created. Logging you in...");
-      // fall through to login with same credentials
+      // confirmation disabled -> fall through to login with same credentials
     }
 
     const r = await call<AuthSession>("POST", "/auth/login", {
@@ -56,7 +73,94 @@ export default function AuthView({
     });
     setBusy(false);
     if (r.error || !r.data) return setError(r.error ?? "Login failed");
+    if (r.data.mfa_required && r.data.factor_id) {
+      setMfaStep({ factorId: r.data.factor_id, session: r.data });
+      setMfaCode("");
+      return;
+    }
     onSession(r.data);
+  }
+
+  async function verifyMfa(e: React.FormEvent) {
+    e.preventDefault();
+    if (!mfaStep) return;
+    setError(null);
+    setBusy(true);
+    const r = await call<AuthSession>("POST", "/auth/mfa/verify", {
+      token: mfaStep.session.access_token,
+      json: {
+        factor_id: mfaStep.factorId,
+        code: mfaCode.trim(),
+        refresh_token: mfaStep.session.refresh_token,
+      },
+    });
+    setBusy(false);
+    if (r.error || !r.data?.access_token) {
+      return setError(r.error ?? "Invalid code");
+    }
+    onSession(r.data);
+  }
+
+  async function resendConfirmation() {
+    if (!email) return setError("Enter your email first");
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+    const r = await call<{ message?: string }>("POST", "/auth/resend", {
+      json: { email },
+    });
+    setBusy(false);
+    setNotice(
+      r.data?.message ??
+        "If that account needs confirmation, a new email is on its way.",
+    );
+  }
+
+  if (mfaStep) {
+    return (
+      <main className="relative grid min-h-dvh place-items-center px-4 py-10">
+        <ThemeToggle className="absolute right-4 top-4" />
+        <div className="w-full max-w-sm">
+          <div className="mb-8 text-center">
+            <Wordmark className="text-5xl" />
+            <p className="mt-3 text-sm font-medium uppercase tracking-[0.2em] text-faint">
+              DocQA
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              Enter the 6-digit code from your authenticator app
+            </p>
+          </div>
+          <Card className="p-6">
+            <form onSubmit={verifyMfa} className="space-y-4">
+              <Field
+                label="Authentication code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                required
+              />
+              {error && <Alert onClose={() => setError(null)}>{error}</Alert>}
+              <PrimaryButton type="submit" loading={busy} className="w-full">
+                Verify
+              </PrimaryButton>
+            </form>
+            <button
+              type="button"
+              onClick={() => {
+                setMfaStep(null);
+                setMfaCode("");
+                setError(null);
+              }}
+              className="mt-4 w-full text-center text-xs font-medium text-faint transition hover:text-fg"
+            >
+              Back to log in
+            </button>
+          </Card>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -111,12 +215,12 @@ export default function AuthView({
                 label="Password"
                 type="password"
                 required
-                minLength={6}
+                minLength={8}
                 autoComplete={
                   mode === "login" ? "current-password" : "new-password"
                 }
                 placeholder={
-                  mode === "signup" ? "At least 6 characters" : "••••••••"
+                  mode === "signup" ? "8+ chars, letters and numbers" : "••••••••"
                 }
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -143,17 +247,27 @@ export default function AuthView({
           </form>
 
           {mode === "login" && (
-            <button
-              type="button"
-              onClick={() => {
-                setMode("reset");
-                setError(null);
-                setNotice(null);
-              }}
-              className="mt-4 w-full text-center text-xs font-medium text-faint transition hover:text-fg"
-            >
-              Forgot password?
-            </button>
+            <div className="mt-4 flex flex-col items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("reset");
+                  setError(null);
+                  setNotice(null);
+                }}
+                className="text-xs font-medium text-faint transition hover:text-fg"
+              >
+                Forgot password?
+              </button>
+              <button
+                type="button"
+                onClick={resendConfirmation}
+                disabled={busy}
+                className="text-xs font-medium text-faint transition hover:text-fg disabled:opacity-50"
+              >
+                Resend confirmation email
+              </button>
+            </div>
           )}
           {mode === "reset" && (
             <button

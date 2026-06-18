@@ -24,10 +24,22 @@ APP_ADMIN_EMAILS = {
 }
 DEFAULT_ORGANIZATION_NAME = os.getenv("DEFAULT_ORGANIZATION_NAME", "iORA Workspace")
 
+# Optional signup allowlist. Empty = open signup. Set to a comma-separated list
+# of domains (e.g. "acme.com,acme.io") to restrict new accounts to those domains.
+APP_ALLOWED_EMAIL_DOMAINS = {
+    d.strip().lower().lstrip("@")
+    for d in os.getenv("APP_ALLOWED_EMAIL_DOMAINS", "").split(",")
+    if d.strip()
+}
+
 # Base URL the password-recovery email link redirects back to. Must be listed
 # in Supabase Auth -> URL Configuration -> Redirect URLs. Override per env
 # (e.g. http://localhost:8000 for local dev).
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://iora-docqa-copy-production.up.railway.app")
+
+# Content-Security-Policy ships report-only by default so it cannot break the
+# SPA; set CSP_ENFORCE=true once violation reports look clean to enforce it.
+CSP_ENFORCE = os.getenv("CSP_ENFORCE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # --- LLM fallback chain ---
 # Ordered, comma-separated provider names. First is the everyday primary; each
