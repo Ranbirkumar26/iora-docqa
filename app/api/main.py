@@ -160,6 +160,15 @@ def _runtime_error(request: Request, exc: RuntimeError):
 
 
 logger = logging.getLogger("docqa")
+# Emit our INFO logs (e.g. "rag retrieval: vec=.. kw=.. fused=..") to stdout so
+# they show in container/Railway logs. Without this the "docqa" logger
+# propagates to the root logger (default level WARNING) and INFO is swallowed.
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 @app.exception_handler(Exception)

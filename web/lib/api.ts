@@ -153,6 +153,8 @@ export type AskResponse = {
   mode: "direct" | "rag" | "structured" | "decision" | "memory" | "none";
   sources: string[];
   sql?: string;
+  retrieved?: { vec: number; kw: number; fused: number } | null;
+  answer_type?: "advice" | "factual";
 };
 
 export type SearchResult = {

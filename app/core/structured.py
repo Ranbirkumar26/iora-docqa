@@ -181,4 +181,5 @@ def answer_structured(scope_id: str, question: str, use_org: bool = True):
         "mode": "structured",
         "sources": sorted({fn for _, _, fn in tables}),
         "sql": sql,
+        "answer_type": "factual",  # exact figure from SQL over the real table
     }

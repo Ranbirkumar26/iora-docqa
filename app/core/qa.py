@@ -1,4 +1,5 @@
 """Question answering. Auto-switches direct (full context) vs RAG (retrieval)."""
+import logging
 import re
 
 from app.core.corpus import corpus_stats, fetch_all_texts
@@ -28,6 +29,8 @@ SYSTEM = (
 )
 
 RAG_TOP_K = 15
+
+logger = logging.getLogger("docqa")
 
 
 def _record_answer(
@@ -139,6 +142,7 @@ def ask(
             persist,
         )
 
+    retrieved = None  # debug: retrieval counts, populated only on the rag path
     if stats["mode"] == "direct":
         context = fetch_all_texts(scope_id, use_org)
         user_msg = f"Documents:\n\n{context}\n\nQuestion: {question}"
@@ -172,6 +176,12 @@ def ask(
         )
         sources = sorted({r["filename"] for r in rows})
         user_msg = f"Document excerpts:\n\n{context}\n\nQuestion: {question}"
+        # proof the retrieval pipeline actually ran (not just the mode label):
+        # vec = pgvector hits, kw = full-text hits, fused = after RRF merge.
+        retrieved = {"vec": len(vec_rows), "kw": len(kw_rows), "fused": len(rows)}
+        logger.info(
+            "rag retrieval: vec=%d kw=%d fused=%d", len(vec_rows), len(kw_rows), len(rows)
+        )
 
     # inject saved user facts alongside the document grounding
     system = SYSTEM + (f"\n\n{mem}" if mem else "")
@@ -179,7 +189,13 @@ def ask(
     return _record_answer(
         user_id,
         organization_id,
-        {"answer": answer, "mode": stats["mode"], "sources": sources},
+        {
+            "answer": answer,
+            "mode": stats["mode"],
+            "sources": sources,
+            "retrieved": retrieved,
+            "answer_type": "factual",  # grounded in document text, not a recommendation
+        },
         use_org,
         persist,
     )

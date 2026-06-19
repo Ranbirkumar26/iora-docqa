@@ -4,6 +4,7 @@ This path is separate from factual/SQL Q&A. It turns uploaded evidence into
 recommendations, caveats, and next actions without letting the model invent
 facts outside the corpus.
 """
+import logging
 import re
 
 from app.core.corpus import fetch_all_texts
@@ -14,6 +15,8 @@ from app.llm.provider import complete
 from app.rag.embed import embed_query
 
 DECISION_TOP_K = 20
+
+logger = logging.getLogger("docqa")
 
 _DECISION_RE = re.compile(
     r"\b("
@@ -91,7 +94,7 @@ def _retrieved_context(
         or []
     )
     context = "\n\n".join(f"[Source: {r['filename']}]\n{r['content']}" for r in rows)
-    return context, sorted({r["filename"] for r in rows})
+    return context, sorted({r["filename"] for r in rows}), len(rows)
 
 
 def answer_decision(
@@ -106,12 +109,17 @@ def answer_decision(
     tables = load_tables(scope_id, use_org)
     structured = _table_stats(tables)
 
+    retrieved = None
     if stats["mode"] == "rag":
-        context, retrieved_sources = _retrieved_context(
+        context, retrieved_sources, vec_count = _retrieved_context(
             user_id, organization_id, question, use_org
         )
         if retrieved_sources:
             sources = retrieved_sources
+        # decision retrieval is vector-only (match_chunks) — no FTS/RRF fusion
+        # on this path, so kw is always 0 and fused == vec.
+        retrieved = {"vec": vec_count, "kw": 0, "fused": vec_count}
+        logger.info("decision retrieval: vec=%d (vector-only)", vec_count)
     else:
         context = _direct_context(scope_id, use_org)
 
@@ -141,7 +149,13 @@ def answer_decision(
         f"Document evidence:\n{context}"
     )
     answer = complete(SYSTEM, prompt, max_tokens=1800, temperature=0)
-    return {"answer": answer, "mode": "decision", "sources": sources}
+    return {
+        "answer": answer,
+        "mode": "decision",
+        "sources": sources,
+        "answer_type": "advice",  # grounded recommendation, not a factual claim
+        "retrieved": retrieved,
+    }
 
 
 __all__ = ["answer_decision", "looks_decision_support"]
