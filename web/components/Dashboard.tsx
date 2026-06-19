@@ -22,8 +22,9 @@ import SearchPanel from "@/components/SearchPanel";
 import SummarizePanel from "@/components/SummarizePanel";
 import ReportPanel from "@/components/ReportPanel";
 import SecurityPanel from "@/components/SecurityPanel";
+import ProfilePanel from "@/components/ProfilePanel";
 
-type Tab = "ask" | "search" | "summarize" | "report" | "files";
+type Tab = "ask" | "search" | "summarize" | "report" | "profile" | "files";
 
 function fmtTokens(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -503,13 +504,6 @@ export default function Dashboard({
         </div>
       )}
 
-      <SecurityPanel
-        token={token}
-        refreshToken={refreshToken}
-        onAuthExpired={onAuthExpired}
-        onAccountDeleted={onLogout}
-      />
-
       <div>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
           Memory ({memories.length})
@@ -583,13 +577,14 @@ export default function Dashboard({
           {/* main column */}
           <main className="min-w-0">
             {/* tab bar; Files tab only exists on mobile */}
-            <nav className="mb-5 grid grid-cols-5 rounded-xl bg-inset p-1 lg:max-w-xl lg:grid-cols-4">
+            <nav className="mb-5 grid grid-cols-6 rounded-xl bg-inset p-1 lg:max-w-2xl lg:grid-cols-5">
               {(
                 [
                   ["ask", "Ask"],
                   ["search", "Search"],
                   ["summarize", "Summarize"],
                   ["report", "Report"],
+                  ["profile", "Profile"],
                   ["files", `Files (${files.length})`],
                 ] as [Tab, string][]
               ).map(([key, label]) => (
@@ -643,6 +638,17 @@ export default function Dashboard({
                   onAuthExpired={onAuthExpired}
                   onGenerated={refresh}
                 />
+              )}
+              {tab === "profile" && (
+                <div className="space-y-6">
+                  <ProfilePanel token={token} onAuthExpired={onAuthExpired} />
+                  <SecurityPanel
+                    token={token}
+                    refreshToken={refreshToken}
+                    onAuthExpired={onAuthExpired}
+                    onAccountDeleted={onLogout}
+                  />
+                </div>
               )}
               {/* mobile-only corpus tab; on desktop the sidebar always shows it,
                   so fall back to Ask if the viewport grows past lg */}

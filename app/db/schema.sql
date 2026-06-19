@@ -150,6 +150,19 @@ create table if not exists audit_events (
     created_at      timestamptz not null default now()
 );
 
+-- per-user profile / about details
+create table if not exists profiles (
+    user_id     uuid primary key references auth.users(id) on delete cascade,
+    full_name   text,
+    gender      text,
+    age         integer check (age is null or (age between 13 and 120)),
+    phone       text,
+    city        text,
+    country     text,
+    bio         text,
+    updated_at  timestamptz not null default now()
+);
+
 create index if not exists idx_files_user on files(user_id);
 create index if not exists idx_org_members_user_role on organization_members(user_id, role);
 create index if not exists idx_files_user_hash on files(user_id, content_hash);
@@ -248,6 +261,7 @@ alter table generated_outputs enable row level security;
 alter table processing_jobs enable row level security;
 alter table memories enable row level security;
 alter table audit_events enable row level security;
+alter table profiles enable row level security;
 
 drop policy if exists orgs_member_select on organizations;
 create policy orgs_member_select on organizations
@@ -421,6 +435,12 @@ create policy audit_member_select on audit_events
             where user_id = (select auth.uid())
         )
     );
+
+drop policy if exists profiles_owner on profiles;
+create policy profiles_owner on profiles
+    for all
+    using (user_id = (select auth.uid()))
+    with check (user_id = (select auth.uid()));
 
 -- ===== Vector search RPC: top-k chunks for a user =====
 -- Called from backend. If p_organization_id is null, filters strictly by
