@@ -5,6 +5,7 @@ injected into the Q&A system prompt so the assistant can answer about the user.
 """
 import re
 
+from app.core.profile import get_profile
 from app.db.client import service_client, transient_retry
 
 MAX_MEMORIES = 30
@@ -76,14 +77,37 @@ def delete_memory(user_id: str, mem_id: str) -> None:
     service_client().table("memories").delete().eq("id", mem_id).eq("user_id", user_id).execute()
 
 
+def _profile_lines(user_id: str) -> list[str]:
+    """Profile fields as fact lines (skipping empty ones)."""
+    p = get_profile(user_id) or {}
+    labels = (
+        ("full_name", "Name"),
+        ("gender", "Gender"),
+        ("age", "Age"),
+        ("phone", "Phone"),
+        ("city", "City"),
+        ("country", "Country"),
+        ("bio", "About"),
+    )
+    return [
+        f"{label}: {p[key]}" for key, label in labels if p.get(key) not in (None, "")
+    ]
+
+
 def memory_block(user_id: str) -> str:
-    """Compact bullet list of saved facts for prompt injection. '' if none."""
-    mems = list_memories(user_id)
-    if not mems:
+    """User's profile + saved facts as a bullet list for prompt injection.
+
+    Profile fields are permanent context, treated the same as 'remember' facts.
+    Returns '' when nothing is known.
+    """
+    lines = _profile_lines(user_id) + [
+        m["content"] for m in list_memories(user_id)
+    ]
+    if not lines:
         return ""
-    lines = "\n".join(f"- {m['content']}" for m in mems)
+    body = "\n".join(f"- {line}" for line in lines)
     return (
         "Known facts about this user. When the question is about the user, answer "
         "directly from these facts and do not mention the documents or any "
-        f"'not found' disclaimer:\n{lines}"
+        f"'not found' disclaimer:\n{body}"
     )
