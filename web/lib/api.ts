@@ -204,6 +204,16 @@ export type Memory = {
   created_at: string;
 };
 
+export type Profile = {
+  full_name?: string | null;
+  gender?: string | null;
+  age?: number | null;
+  phone?: string | null;
+  city?: string | null;
+  country?: string | null;
+  bio?: string | null;
+};
+
 export type MemberRow = {
   organization_id: string;
   user_id: string;

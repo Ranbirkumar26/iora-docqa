@@ -36,6 +36,7 @@ from app.core.account import delete_account
 from app.core.audit import list_audit, write_audit
 from app.core.corpus import corpus_stats
 from app.core.passwords import validate_password
+from app.core.profile import get_profile, upsert_profile
 from app.core.ingest import dedupe_check, delete_file, ingest_one
 from app.core.jobs import create_job, list_jobs, update_job
 from app.core.memory import delete_memory, list_memories
@@ -211,6 +212,16 @@ class MfaVerifyIn(BaseModel):
 class MfaUnenrollIn(BaseModel):
     factor_id: str
     refresh_token: str
+
+
+class ProfileIn(BaseModel):
+    full_name: str | None = Field(default=None, max_length=100)
+    gender: str | None = Field(default=None, max_length=30)
+    age: int | None = Field(default=None, ge=13, le=120)
+    phone: str | None = Field(default=None, max_length=30)
+    city: str | None = Field(default=None, max_length=100)
+    country: str | None = Field(default=None, max_length=100)
+    bio: str | None = Field(default=None, max_length=1000)
 
 
 def _session_payload(res) -> dict:
@@ -1012,6 +1023,18 @@ def delete_memory_endpoint(mem_id: str, ctx: AuthContext = Depends(get_auth_cont
         raise HTTPException(403, "Authors are read-only and cannot delete memory")
     delete_memory(ctx.user_id, mem_id)
     return {"deleted": mem_id}
+
+
+@api.get("/profile")
+def get_profile_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    return {"profile": get_profile(ctx.user_id)}
+
+
+@api.put("/profile")
+def update_profile_endpoint(
+    body: ProfileIn, ctx: AuthContext = Depends(get_auth_context)
+):
+    return {"profile": upsert_profile(ctx.user_id, body.model_dump())}
 
 
 @api.get("/health")
