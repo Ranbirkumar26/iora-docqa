@@ -576,8 +576,11 @@ export default function Dashboard({
 
           {/* main column */}
           <main className="min-w-0">
-            {/* tab bar; Files tab only exists on mobile */}
-            <nav className="mb-5 grid grid-cols-6 rounded-xl bg-inset p-1 lg:max-w-2xl lg:grid-cols-5">
+            {/* tab bar; Files tab only exists on mobile.
+                Mobile: 3 cols x 2 rows so 6 labels stay readable on narrow
+                screens (grid-cols-6 squashed "Summarize"/"Report"/"Profile").
+                Desktop: single row of 5 (Files hidden, shown in the sidebar). */}
+            <nav className="mb-5 grid grid-cols-3 gap-1 rounded-xl bg-inset p-1 lg:max-w-2xl lg:grid-cols-5">
               {(
                 [
                   ["ask", "Ask"],
@@ -591,7 +594,7 @@ export default function Dashboard({
                 <button
                   key={key}
                   onClick={() => setTab(key)}
-                  className={`min-h-10 rounded-lg text-sm font-medium transition ${
+                  className={`min-h-10 truncate whitespace-nowrap rounded-lg px-2 text-sm font-medium transition ${
                     key === "files" ? "lg:hidden" : ""
                   } ${
                     tab === key
