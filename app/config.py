@@ -35,7 +35,7 @@ APP_ALLOWED_EMAIL_DOMAINS = {
 # Base URL the password-recovery email link redirects back to. Must be listed
 # in Supabase Auth -> URL Configuration -> Redirect URLs. Override per env
 # (e.g. http://localhost:8000 for local dev).
-APP_BASE_URL = os.getenv("APP_BASE_URL", "https://iora-docqa-copy-production.up.railway.app")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://docqa-production.up.railway.app")
 
 # Content-Security-Policy ships report-only by default so it cannot break the
 # SPA; set CSP_ENFORCE=true once violation reports look clean to enforce it.

@@ -1,6 +1,7 @@
-# Render blueprint — one web service (Streamlit UI public, FastAPI internal).
+# Render blueprint — one Docker web service (FastAPI serves the SPA at / and the
+# API under /api; single container, same image as the Railway deploy).
 # Deploy: push repo to GitHub -> Render -> New -> Blueprint -> pick repo.
-# Then set the 4 secret env vars below in the dashboard.
+# Then set the secret / instance env vars below in the dashboard.
 services:
   - type: web
     name: docqa
@@ -9,11 +10,25 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
-      - key: GEMINI_API_KEY
-        sync: false             # set in dashboard (secret)
+      # --- required secrets (set in dashboard) ---
+      - key: GEMINI_API_KEY      # required: embeddings + LLM fallback
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_KEY
+        sync: false
+      # --- LLM chain (optional; chain skips providers without a key) ---
+      - key: GROQ_API_KEY        # primary LLM (default LLM_CHAIN=groq,gemini,qwen)
+        sync: false
+      - key: QWEN_API_KEY        # optional fallback (OpenRouter)
+        sync: false
+      # --- app config ---
+      # MUST point at THIS service's public URL so password-reset / email-confirm
+      # links redirect back here, AND add the same URL to Supabase Auth ->
+      # URL Configuration -> Redirect URLs.
+      - key: APP_BASE_URL        # e.g. https://<your-app>.onrender.com
+        sync: false
+      - key: APP_ADMIN_EMAILS    # comma-separated bootstrap admin emails
         sync: false
