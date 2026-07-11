@@ -24,7 +24,14 @@ import ReportPanel from "@/components/ReportPanel";
 import SecurityPanel from "@/components/SecurityPanel";
 import ProfilePanel from "@/components/ProfilePanel";
 
-type Tab = "ask" | "search" | "summarize" | "report" | "profile" | "files";
+type Tab =
+  | "ask"
+  | "search"
+  | "summarize"
+  | "report"
+  | "profile"
+  | "access"
+  | "files";
 
 function fmtTokens(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -37,6 +44,20 @@ const ROLE_TONE = {
   author: "amber",
   admin: "emerald",
 } as const;
+
+function memberIsSuperAdmin(member: MemberRow) {
+  return member.is_super_admin === true || member.is_bootstrap_admin === true;
+}
+
+function statusRoleLabel(status: Status | null) {
+  if (status?.is_super_admin) return "Super Admin";
+  return status?.role ?? "...";
+}
+
+function memberRoleLabel(member: MemberRow) {
+  if (memberIsSuperAdmin(member)) return "Super Admin";
+  return member.role.charAt(0).toUpperCase() + member.role.slice(1);
+}
 
 function downloadText(filename: string, mimeType: string, content: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -116,6 +137,11 @@ export default function Dashboard({
 
   async function updateMemberRole(userId: string, role: MemberRow["role"]) {
     setAccessMessage(null);
+    const member = members.find((m) => m.user_id === userId);
+    if (member && memberIsSuperAdmin(member)) {
+      setAccessMessage("Super Admin permissions cannot be changed.");
+      return;
+    }
     const r = await call<{ member: MemberRow }>("PATCH", `/members/${userId}`, {
       token,
       json: { role },
@@ -130,6 +156,10 @@ export default function Dashboard({
 
   async function toggleSuspend(member: MemberRow) {
     setAccessMessage(null);
+    if (memberIsSuperAdmin(member)) {
+      setAccessMessage("Super Admin account controls are locked.");
+      return;
+    }
     const path = member.banned
       ? `/members/${member.user_id}/unsuspend`
       : `/members/${member.user_id}/suspend`;
@@ -140,6 +170,10 @@ export default function Dashboard({
   }
 
   async function removeMember(member: MemberRow) {
+    if (memberIsSuperAdmin(member)) {
+      setAccessMessage("Super Admin account controls are locked.");
+      return;
+    }
     const who = member.email || member.user_id;
     if (
       !window.confirm(
@@ -155,6 +189,10 @@ export default function Dashboard({
   }
 
   async function resetMfa(member: MemberRow) {
+    if (memberIsSuperAdmin(member)) {
+      setAccessMessage("Super Admin account controls are locked.");
+      return;
+    }
     const who = member.email || member.user_id;
     if (
       !window.confirm(
@@ -225,10 +263,23 @@ export default function Dashboard({
   const canDelete = status?.can_delete !== false;
   const canManageRoles = status?.can_write_all === true;
   const isReadOnly = status?.is_read_only === true;
+  const navItems: [Tab, string][] = [
+    ["ask", "Ask"],
+    ["search", "Search"],
+    ["summarize", "Summarize"],
+    ["report", "Report"],
+    ["profile", "Profile"],
+    ...(canManageRoles ? ([["access", "Access Control"]] as [Tab, string][]) : []),
+    ["files", `Files (${files.length})`],
+  ];
 
   useEffect(() => {
     if (!canUpload && attachExport) setAttachExport(false);
   }, [attachExport, canUpload]);
+
+  useEffect(() => {
+    if (tab === "access" && !canManageRoles) setTab("ask");
+  }, [tab, canManageRoles]);
 
   const corpusPanel = (
     <div className="space-y-5">
@@ -263,7 +314,9 @@ export default function Dashboard({
             <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
               Access mode
             </span>
-            <Badge tone={ROLE_TONE[status.role]}>{status.role}</Badge>
+            <Badge tone={ROLE_TONE[status.role]}>
+              {statusRoleLabel(status)}
+            </Badge>
           </div>
         )}
         <div className="mt-4 grid grid-cols-2 gap-2 border-t border-edge pt-3 text-center">
@@ -393,117 +446,6 @@ export default function Dashboard({
         )}
       </div>
 
-      {canManageRoles && (
-        <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
-            Access control ({members.length})
-          </h3>
-          <Card className="space-y-2 p-3">
-            {members.length === 0 ? (
-              <p className="text-xs text-faint">No organisation members found.</p>
-            ) : (
-              members.map((member) => {
-                const isSelf = member.user_id === status?.user_id;
-                return (
-                  <div
-                    key={member.user_id}
-                    className="space-y-1.5 rounded-lg border border-edge/70 bg-inset px-2.5 py-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-xs text-muted">
-                        {member.email || member.user_id}
-                        {isSelf ? " (you)" : ""}
-                      </span>
-                      {member.banned && (
-                        <span className="shrink-0 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400">
-                          suspended
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <select
-                        value={member.role}
-                        onChange={(e) =>
-                          updateMemberRole(
-                            member.user_id,
-                            e.target.value as MemberRow["role"],
-                          )
-                        }
-                        disabled={member.is_bootstrap_admin}
-                        className="min-h-8 flex-1 rounded-lg border border-edge-strong bg-field px-2 text-xs text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-                        aria-label={`Role for ${member.email || member.user_id}`}
-                      >
-                        {member.is_bootstrap_admin ? (
-                          <option value="admin">Admin</option>
-                        ) : (
-                          <>
-                            <option value="user">User</option>
-                            <option value="author">Author</option>
-                            <option value="admin">Admin</option>
-                          </>
-                        )}
-                      </select>
-                      {!member.is_bootstrap_admin && !isSelf && (
-                        <>
-                          <button
-                            onClick={() => toggleSuspend(member)}
-                            className="min-h-8 shrink-0 rounded-lg border border-edge-strong px-2 text-[11px] text-muted transition hover:text-fg"
-                          >
-                            {member.banned ? "Reinstate" : "Suspend"}
-                          </button>
-                          <button
-                            onClick={() => resetMfa(member)}
-                            className="min-h-8 shrink-0 rounded-lg border border-edge-strong px-2 text-[11px] text-muted transition hover:text-fg"
-                          >
-                            Reset 2FA
-                          </button>
-                          <button
-                            onClick={() => removeMember(member)}
-                            aria-label={`Remove ${member.email || member.user_id}`}
-                            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg text-faint transition hover:bg-red-500/10 hover:text-red-500"
-                          >
-                            <IconTrash className="h-3.5 w-3.5" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </Card>
-          {accessMessage && (
-            <div className="mt-2">
-              <Alert onClose={() => setAccessMessage(null)}>{accessMessage}</Alert>
-            </div>
-          )}
-        </div>
-      )}
-
-      {canManageRoles && (
-        <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
-            Audit log ({audit.length})
-          </h3>
-          <Card className="max-h-64 space-y-2 overflow-y-auto p-3">
-            {audit.length === 0 ? (
-              <p className="text-xs text-faint">No recorded admin actions yet.</p>
-            ) : (
-              audit.map((e) => (
-                <div key={e.id} className="text-[11px] leading-snug text-muted">
-                  <span className="font-semibold text-fg">{e.action}</span>
-                  {e.detail ? ` · ${e.detail}` : ""}
-                  {e.target_user_id ? ` · ${e.target_user_id.slice(0, 8)}` : ""}
-                  <span className="block text-faint">
-                    {new Date(e.created_at).toLocaleString()}
-                  </span>
-                </div>
-              ))
-            )}
-          </Card>
-        </div>
-      )}
-
       <div>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
           Memory ({memories.length})
@@ -538,6 +480,165 @@ export default function Dashboard({
           </ul>
         )}
       </div>
+    </div>
+  );
+
+  const superAdmin = members.find(memberIsSuperAdmin);
+  const adminCount = members.filter(
+    (member) => member.role === "admin" || memberIsSuperAdmin(member),
+  ).length;
+  const accessPanel = (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card className="p-4">
+          <p className="text-2xl font-bold">{members.length}</p>
+          <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-faint">
+            Members
+          </p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-2xl font-bold">{adminCount}</p>
+          <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-faint">
+            Admins
+          </p>
+        </Card>
+        <Card className="p-4">
+          <p className="truncate text-sm font-semibold text-fg">
+            {superAdmin?.email || "rk26.ftw@gmail.com"}
+          </p>
+          <div className="mt-2">
+            <Badge tone="emerald">Super Admin</Badge>
+          </div>
+        </Card>
+      </div>
+
+      {accessMessage && (
+        <Alert onClose={() => setAccessMessage(null)}>{accessMessage}</Alert>
+      )}
+
+      <Card className="overflow-hidden">
+        <div className="border-b border-edge bg-inset/50 px-4 py-3">
+          <h3 className="text-sm font-semibold text-fg">Access Control</h3>
+          <p className="mt-1 text-xs text-faint">
+            Role and account controls for workspace members.
+          </p>
+        </div>
+        {members.length === 0 ? (
+          <p className="p-4 text-sm text-faint">No organisation members found.</p>
+        ) : (
+          <div className="divide-y divide-edge">
+            {members.map((member) => {
+              const isSelf = member.user_id === status?.user_id;
+              const isSuper = memberIsSuperAdmin(member);
+              const controlsLocked = isSuper || isSelf;
+              return (
+                <div
+                  key={member.user_id}
+                  className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_190px_auto]"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="min-w-0 truncate text-sm font-medium text-fg">
+                        {member.email || member.user_id}
+                        {isSelf ? " (you)" : ""}
+                      </p>
+                      <Badge tone={isSuper ? "emerald" : ROLE_TONE[member.role]}>
+                        {memberRoleLabel(member)}
+                      </Badge>
+                      {member.banned && (
+                        <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400">
+                          suspended
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-faint">
+                      {member.user_id}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center">
+                    {isSuper ? (
+                      <div className="min-h-10 w-full rounded-lg border border-edge-strong bg-inset px-3 py-2 text-sm font-medium text-muted">
+                        Super Admin
+                      </div>
+                    ) : (
+                      <select
+                        value={member.role}
+                        onChange={(e) =>
+                          updateMemberRole(
+                            member.user_id,
+                            e.target.value as MemberRow["role"],
+                          )
+                        }
+                        className="min-h-10 w-full rounded-lg border border-edge-strong bg-field px-3 text-sm text-fg focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                        aria-label={`Role for ${member.email || member.user_id}`}
+                      >
+                        <option value="user">User</option>
+                        <option value="author">Author</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                    {!controlsLocked && (
+                      <>
+                        <button
+                          onClick={() => toggleSuspend(member)}
+                          className="min-h-10 rounded-lg border border-edge-strong px-3 text-xs font-medium text-muted transition hover:bg-inset hover:text-fg"
+                        >
+                          {member.banned ? "Reinstate" : "Suspend"}
+                        </button>
+                        <button
+                          onClick={() => resetMfa(member)}
+                          className="min-h-10 rounded-lg border border-edge-strong px-3 text-xs font-medium text-muted transition hover:bg-inset hover:text-fg"
+                        >
+                          Reset 2FA
+                        </button>
+                        <button
+                          onClick={() => removeMember(member)}
+                          aria-label={`Remove ${member.email || member.user_id}`}
+                          className="grid min-h-10 min-w-10 place-items-center rounded-lg text-faint transition hover:bg-red-500/10 hover:text-red-500"
+                        >
+                          <IconTrash className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="border-b border-edge bg-inset/50 px-4 py-3">
+          <h3 className="text-sm font-semibold text-fg">Audit Log</h3>
+        </div>
+        <div className="max-h-72 divide-y divide-edge overflow-y-auto">
+          {audit.length === 0 ? (
+            <p className="p-4 text-sm text-faint">No recorded admin actions yet.</p>
+          ) : (
+            audit.map((event) => (
+              <div key={event.id} className="px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-fg">{event.action}</span>
+                  {event.detail && (
+                    <span className="text-muted">{event.detail}</span>
+                  )}
+                  {event.target_user_id && (
+                    <Badge>{event.target_user_id.slice(0, 8)}</Badge>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-faint">
+                  {new Date(event.created_at).toLocaleString()}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
     </div>
   );
 
@@ -576,21 +677,13 @@ export default function Dashboard({
 
           {/* main column */}
           <main className="min-w-0">
-            {/* tab bar; Files tab only exists on mobile.
-                Mobile: 3 cols x 2 rows so 6 labels stay readable on narrow
-                screens (grid-cols-6 squashed "Summarize"/"Report"/"Profile").
-                Desktop: single row of 5 (Files hidden, shown in the sidebar). */}
-            <nav className="mb-5 grid grid-cols-3 gap-1 rounded-xl bg-inset p-1 lg:max-w-2xl lg:grid-cols-5">
-              {(
-                [
-                  ["ask", "Ask"],
-                  ["search", "Search"],
-                  ["summarize", "Summarize"],
-                  ["report", "Report"],
-                  ["profile", "Profile"],
-                  ["files", `Files (${files.length})`],
-                ] as [Tab, string][]
-              ).map(([key, label]) => (
+            {/* tab bar; Files tab only exists on mobile because desktop has the sidebar. */}
+            <nav
+              className={`mb-5 grid grid-cols-3 gap-1 rounded-xl bg-inset p-1 ${
+                canManageRoles ? "lg:max-w-3xl lg:grid-cols-6" : "lg:max-w-2xl lg:grid-cols-5"
+              }`}
+            >
+              {navItems.map(([key, label]) => (
                 <button
                   key={key}
                   onClick={() => setTab(key)}
@@ -653,6 +746,7 @@ export default function Dashboard({
                   />
                 </div>
               )}
+              {tab === "access" && canManageRoles && accessPanel}
               {/* mobile-only corpus tab; on desktop the sidebar always shows it,
                   so fall back to Ask if the viewport grows past lg */}
               {tab === "files" && (

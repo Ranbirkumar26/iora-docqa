@@ -95,6 +95,26 @@ export function IconSearch({ className }: P) {
   );
 }
 
+export function IconEye({ className }: P) {
+  return (
+    <Svg className={className}>
+      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </Svg>
+  );
+}
+
+export function IconEyeOff({ className }: P) {
+  return (
+    <Svg className={className}>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6A3 3 0 0 0 13.4 13.4" />
+      <path d="M9.9 5.3A10.5 10.5 0 0 1 12 5c6.5 0 10 7 10 7a18.5 18.5 0 0 1-3.2 4.1" />
+      <path d="M6.6 6.9C3.7 8.8 2 12 2 12s3.5 7 10 7a10 10 0 0 0 4.1-.9" />
+    </Svg>
+  );
+}
+
 export function IconSun({ className }: P) {
   return (
     <Svg className={className}>

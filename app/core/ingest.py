@@ -90,6 +90,8 @@ def ingest_one(
 
     # 1. parse -> text (raises ValueError for unsupported type)
     text = parse_file(filename, data)
+    if not text.strip():
+        raise ValueError("empty file or no readable text found")
     char_count = len(text)
 
     file_id = str(uuid.uuid4())

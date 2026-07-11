@@ -5,6 +5,7 @@ is overridden to a fixed user, mirroring a logged-in caller.
 """
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,13 +21,17 @@ def _ctx():
 
 
 class _Admin:
-    def __init__(self, email="u@example.com"):
+    def __init__(self, email="u@example.com", existing_emails=None):
         self.email = email
+        self.existing_emails = existing_emails or []
         self.updated = None
         self.signed_out = None
 
     def get_user_by_id(self, uid):
         return SimpleNamespace(user=SimpleNamespace(id=uid, email=self.email))
+
+    def list_users(self, page=None, per_page=None):
+        return [SimpleNamespace(email=email) for email in self.existing_emails]
 
     def update_user_by_id(self, uid, attrs):
         self.updated = (uid, attrs)
@@ -34,6 +39,20 @@ class _Admin:
 
     def sign_out(self, jwt, scope="global"):
         self.signed_out = (jwt, scope)
+
+
+class _FlakyAdmin(_Admin):
+    def __init__(self, exc, fail_times=1):
+        super().__init__()
+        self.exc = exc
+        self.fail_times = fail_times
+        self.update_calls = 0
+
+    def update_user_by_id(self, uid, attrs):
+        self.update_calls += 1
+        if self.update_calls <= self.fail_times:
+            raise self.exc
+        return super().update_user_by_id(uid, attrs)
 
 
 class _Auth:
@@ -45,6 +64,7 @@ class _Auth:
         self._signup_session = signup_session
         self._signup_raises = signup_raises
         self.resent = None
+        self.signed_up = None
 
     def sign_in_with_password(self, creds):
         if not self._signin_ok:
@@ -54,6 +74,7 @@ class _Auth:
         )
 
     def sign_up(self, creds):
+        self.signed_up = creds
         if self._signup_raises:
             raise Exception("provider error")
         return SimpleNamespace(
@@ -86,12 +107,13 @@ def _wire(
     signup_session=False,
     signup_raises=False,
     admin_email="u@example.com",
+    existing_emails=None,
 ):
     """Point service_client + fresh_anon_client at fakes sharing one admin.
 
     Returns (admin, anon_auth) so tests can assert side effects.
     """
-    admin = _Admin(admin_email)
+    admin = _Admin(admin_email, existing_emails)
     anon_auth = _Auth(admin, signin_ok, signup_session, signup_raises)
     monkeypatch.setattr(main, "service_client", lambda: _Client(_Auth(admin)))
     monkeypatch.setattr(main, "fresh_anon_client", lambda: _Client(anon_auth))
@@ -147,10 +169,20 @@ def test_signup_auto_ok_when_session_returned(client, monkeypatch):
     assert r.json()["needs_confirmation"] is False
 
 
-def test_signup_masks_provider_errors_no_enumeration(client, monkeypatch):
+def test_signup_rejects_existing_email(client, monkeypatch):
+    _, anon_auth = _wire(monkeypatch, existing_emails=["dup@b.com"])
+    r = client.post(
+        "/api/auth/signup", json={"email": "Dup@B.com", "password": "secret12"}
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Email already exists. Please log in instead."
+    assert anon_auth.signed_up is None
+
+
+def test_signup_masks_unrelated_provider_errors(client, monkeypatch):
     _wire(monkeypatch, signup_raises=True)
     r = client.post("/api/auth/signup", json={"email": "dup@b.com", "password": "secret12"})
-    # generic success, never reveals the failure / existence
+    # generic success for non-duplicate provider failures
     assert r.status_code == 200
     assert r.json()["needs_confirmation"] is True
 
@@ -212,6 +244,35 @@ def test_delete_account_endpoint_handles_failure(client, monkeypatch):
     monkeypatch.setattr(main, "delete_account", boom)
     r = client.delete("/api/account")
     assert r.status_code == 500
+
+
+def test_upload_skips_empty_file_before_ingestion(client, monkeypatch):
+    called = {}
+
+    def mark_called(name):
+        def _inner(*args, **kwargs):
+            called[name] = True
+            return ("new", None) if name == "dedupe" else None
+
+        return _inner
+
+    monkeypatch.setattr(main, "dedupe_check", mark_called("dedupe"))
+    monkeypatch.setattr(main, "ingest_one", mark_called("ingest"))
+    monkeypatch.setattr(main, "create_job", lambda *a, **k: "job1")
+    monkeypatch.setattr(main, "update_job", lambda *a, **k: None)
+    monkeypatch.setattr(main, "corpus_stats", lambda *a, **k: {"file_count": 0})
+
+    r = client.post(
+        "/api/upload",
+        files=[("files", ("empty.txt", b"", "text/plain"))],
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["uploaded"] == []
+    assert body["replaced"] == []
+    assert body["skipped"] == [{"filename": "empty.txt", "reason": "empty file"}]
+    assert called == {}
 
 
 class _PurgeQuery:
@@ -317,6 +378,33 @@ def test_admin_suspend_member(monkeypatch):
     assert "ban_duration" in admin.updated[1]
 
 
+def test_admin_suspend_retries_transient_auth_failure(monkeypatch):
+    _admin_override()
+    admin = _FlakyAdmin(httpx.ConnectError("temporary connection reset"))
+    monkeypatch.setattr(main, "service_client", lambda: _Client(_Auth(admin)))
+    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
+    try:
+        r = TestClient(app).post("/api/members/target1/suspend")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert admin.update_calls == 2
+    assert admin.updated[0] == "target1"
+
+
+def test_admin_suspend_does_not_retry_non_transient_failure(monkeypatch):
+    _admin_override()
+    admin = _FlakyAdmin(ValueError("bad request"))
+    monkeypatch.setattr(main, "service_client", lambda: _Client(_Auth(admin)))
+    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
+    try:
+        r = TestClient(app).post("/api/members/target1/suspend")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 400
+    assert admin.update_calls == 1
+
+
 def test_admin_remove_member_calls_delete(monkeypatch):
     _admin_override()
     called = {}
@@ -345,6 +433,32 @@ def test_cannot_suspend_bootstrap_admin(monkeypatch):
         app.dependency_overrides.clear()
     assert r.status_code == 403
     assert admin.updated is None  # bootstrap admin never banned
+
+
+def test_cannot_unsuspend_super_admin(monkeypatch):
+    _admin_override()
+    admin, _ = _wire(monkeypatch, admin_email="rk26.ftw@gmail.com")
+    try:
+        r = TestClient(app).post("/api/members/boss/unsuspend")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 403
+    assert admin.updated is None
+
+
+def test_cannot_reset_super_admin_mfa(monkeypatch):
+    _admin_override()
+    _wire(monkeypatch, admin_email="rk26.ftw@gmail.com")
+    called = {}
+    monkeypatch.setattr(
+        main.mfa, "admin_reset", lambda uid: called.setdefault("uid", uid)
+    )
+    try:
+        r = TestClient(app).post("/api/members/boss/mfa-reset")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 403
+    assert called == {}
 
 
 def test_admin_action_writes_audit(monkeypatch):
@@ -439,6 +553,27 @@ def test_admin_mfa_reset(monkeypatch):
     assert r.status_code == 200
     assert r.json()["removed"] == 2
     assert events and events[0][2] == "mfa_reset"
+
+
+def test_admin_mfa_reset_retries_transient_failure(monkeypatch):
+    _admin_override()
+    calls = {"count": 0}
+
+    def flaky_reset(uid):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise httpx.ReadTimeout("temporary timeout")
+        return 1
+
+    monkeypatch.setattr(main.mfa, "admin_reset", flaky_reset)
+    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
+    try:
+        r = TestClient(app).post("/api/members/target1/mfa-reset")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert r.json()["removed"] == 1
+    assert calls["count"] == 2
 
 
 def test_mfa_reset_requires_admin(client):

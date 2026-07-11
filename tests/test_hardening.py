@@ -57,3 +57,10 @@ def test_ask_rejects_overlong_question():
         app.dependency_overrides.clear()
         main.limiter.enabled = True
     assert r.status_code == 422  # Field(max_length=8000)
+
+
+def test_spa_shell_is_served_without_stale_cache():
+    r = TestClient(app).get("/")
+    assert r.status_code == 200
+    assert r.headers.get("cache-control") == "no-cache, must-revalidate"
+    assert r.headers.get("pragma") == "no-cache"

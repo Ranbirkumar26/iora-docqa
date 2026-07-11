@@ -31,6 +31,7 @@ class AuthContext:
     organization_name: str
     role: str = "user"
     org_enabled: bool = True
+    is_super_admin: bool = False
     access_token: str | None = None  # caller's JWT, for RLS-scoped reads
 
     @property
@@ -104,6 +105,7 @@ def _legacy_context(user_id: str, email: str | None = None) -> AuthContext:
         organization_name=_name_from_email(email),
         role="user",
         org_enabled=False,
+        is_super_admin=is_bootstrap_admin(email),
     )
 
 
@@ -144,6 +146,67 @@ def _user_email(user_id: str) -> str | None:
         return getattr(user, "email", None)
     except Exception:
         return None
+
+
+def _auth_user_id(user) -> str | None:
+    if isinstance(user, dict):
+        return user.get("id")
+    return getattr(user, "id", None)
+
+
+def _auth_user_email(user) -> str | None:
+    if isinstance(user, dict):
+        return user.get("email")
+    return getattr(user, "email", None)
+
+
+def _list_auth_users(admin) -> list:
+    users = []
+    page = 1
+    per_page = 1000
+    while page <= 20:
+        batch = admin.list_users(page=page, per_page=per_page) or []
+        users.extend(batch)
+        if len(batch) < per_page:
+            break
+        page += 1
+    return users
+
+
+def _sync_org_members_from_auth(organization_id: str) -> None:
+    """Ensure every Supabase Auth user appears in the shared workspace.
+
+    Older accounts, unconfirmed accounts, or users created outside this app may
+    exist in auth.users before they ever hit get_user_org(). Admin role
+    management should still show them instead of making the account look
+    invisible while signup correctly says it already exists.
+    """
+    sb = service_client()
+    existing = (
+        sb.table("organization_members")
+        .select("user_id")
+        .eq("organization_id", organization_id)
+        .execute()
+        .data
+        or []
+    )
+    existing_ids = {row["user_id"] for row in existing if row.get("user_id")}
+    inserts = []
+    for user in _list_auth_users(sb.auth.admin):
+        user_id = _auth_user_id(user)
+        if not user_id or user_id in existing_ids:
+            continue
+        email = _auth_user_email(user)
+        inserts.append(
+            {
+                "organization_id": organization_id,
+                "user_id": user_id,
+                "role": "admin" if is_bootstrap_admin(email) else "user",
+            }
+        )
+        existing_ids.add(user_id)
+    if inserts:
+        sb.table("organization_members").insert(inserts).execute()
 
 
 @transient_retry()
@@ -189,13 +252,20 @@ def create_personal_org(user_id: str, email: str | None = None) -> AuthContext:
             row["organization_id"],
             org.get("name") or "Workspace",
             role,
+            is_super_admin=is_bootstrap_admin(email),
         )
 
     role = "admin" if is_bootstrap_admin(email) else "user"
     sb.table("organization_members").insert(
         {"organization_id": default_org["id"], "user_id": user_id, "role": role}
     ).execute()
-    return AuthContext(user_id, default_org["id"], default_org["name"], role)
+    return AuthContext(
+        user_id,
+        default_org["id"],
+        default_org["name"],
+        role,
+        is_super_admin=is_bootstrap_admin(email),
+    )
 
 
 @transient_retry()
@@ -205,6 +275,10 @@ def get_user_org(user_id: str, email: str | None = None) -> AuthContext:
 
 
 def list_org_members(organization_id: str) -> list[dict]:
+    try:
+        _sync_org_members_from_auth(organization_id)
+    except Exception:
+        pass
     rows = (
         service_client()
         .table("organization_members")
@@ -230,6 +304,7 @@ def list_org_members(organization_id: str) -> list[dict]:
                 "banned": bool(getattr(user, "banned_until", None)),
                 "role": normalize_role(row.get("role")),
                 "is_bootstrap_admin": is_bootstrap_admin(email),
+                "is_super_admin": is_bootstrap_admin(email),
             }
         )
     return enriched
@@ -244,7 +319,7 @@ def set_org_member_role(organization_id: str, user_id: str, role: str) -> dict |
         raise ValueError("Role must be user, author, or admin")
     email = _user_email(user_id)
     if is_bootstrap_admin(email) and normalized != "admin":
-        raise ValueError("Bootstrap admin accounts must remain admin")
+        raise ValueError("Super Admin accounts must remain Super Admin")
     rows = (
         service_client()
         .table("organization_members")

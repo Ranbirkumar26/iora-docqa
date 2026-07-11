@@ -8,6 +8,7 @@ __pycache__/
 !.env.template
 .DS_Store
 uploads/
+outputs/
 
 # web build artifacts — the image builds these fresh
 web/node_modules/

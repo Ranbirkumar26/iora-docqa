@@ -5,6 +5,7 @@ import { AuthSession, call } from "@/lib/api";
 import { Alert, Card, Field, PrimaryButton } from "@/components/ui";
 import { Wordmark } from "@/components/Brand";
 import ThemeToggle from "@/components/ThemeToggle";
+import { IconEye, IconEyeOff } from "@/components/icons";
 
 type Mode = "login" | "signup" | "reset";
 
@@ -16,6 +17,7 @@ export default function AuthView({
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -211,20 +213,45 @@ export default function AuthView({
               onChange={(e) => setEmail(e.target.value)}
             />
             {mode !== "reset" && (
-              <Field
-                label="Password"
-                type="password"
-                required
-                minLength={8}
-                autoComplete={
-                  mode === "login" ? "current-password" : "new-password"
-                }
-                placeholder={
-                  mode === "signup" ? "8+ chars, letters and numbers" : "••••••••"
-                }
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted">
+                  Password
+                </span>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    minLength={8}
+                    autoComplete={
+                      mode === "login" ? "current-password" : "new-password"
+                    }
+                    placeholder={
+                      mode === "signup"
+                        ? "8+ chars, letters and numbers"
+                        : "Password"
+                    }
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="min-h-11 w-full rounded-xl border border-edge-strong bg-field px-3.5 py-2.5 pr-12 text-sm text-fg placeholder-faint transition focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-faint transition hover:bg-inset hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                    aria-pressed={showPassword}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <IconEyeOff className="h-4 w-4" />
+                    ) : (
+                      <IconEye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </label>
             )}
 
             {mode === "reset" && (

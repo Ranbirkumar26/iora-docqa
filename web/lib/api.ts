@@ -125,6 +125,7 @@ export type Status = {
   org_enabled?: boolean;
   user_id?: string;
   role?: "user" | "author" | "admin";
+  is_super_admin?: boolean;
   can_read_all?: boolean;
   can_write_all?: boolean;
   is_read_only?: boolean;
@@ -222,6 +223,7 @@ export type MemberRow = {
   email?: string | null;
   role: "user" | "author" | "admin";
   is_bootstrap_admin?: boolean;
+  is_super_admin?: boolean;
   banned?: boolean;
   created_at: string;
 };

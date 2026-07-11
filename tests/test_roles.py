@@ -1,8 +1,11 @@
+from types import SimpleNamespace
+
 import app.core.orgs as orgs
 from app.core.orgs import (
     AuthContext,
     email_domain_allowed,
     is_bootstrap_admin,
+    list_org_members,
     normalize_role,
 )
 
@@ -69,3 +72,80 @@ def test_admin_role_manages_roles_but_data_stays_user_scoped():
     assert ctx.scope_id == "user-1"
     assert ctx.write_scope_id == "user-1"
     assert ctx.write_scope_uses_org is False
+
+
+def test_list_members_backfills_auth_users_missing_membership(monkeypatch):
+    store = {
+        "organization_members": [
+            {
+                "organization_id": "org-1",
+                "user_id": "admin-1",
+                "role": "admin",
+                "created_at": "now",
+            }
+        ]
+    }
+    auth_users = {
+        "admin-1": SimpleNamespace(
+            id="admin-1", email="rk26.ftw@gmail.com", banned_until=None
+        ),
+        "missing-1": SimpleNamespace(
+            id="missing-1",
+            email="ranbir.kumar2023@vitstudent.ac.in",
+            banned_until=None,
+        ),
+    }
+
+    class Query:
+        def __init__(self, table):
+            self.table = table
+            self.filters = {}
+            self.payload = None
+
+        def select(self, *_args):
+            return self
+
+        def eq(self, key, value):
+            self.filters[key] = value
+            return self
+
+        def insert(self, payload):
+            self.payload = payload if isinstance(payload, list) else [payload]
+            return self
+
+        def execute(self):
+            if self.payload is not None:
+                store[self.table].extend(self.payload)
+                return SimpleNamespace(data=self.payload)
+            rows = [
+                row
+                for row in store[self.table]
+                if all(row.get(k) == v for k, v in self.filters.items())
+            ]
+            return SimpleNamespace(data=rows)
+
+    class Admin:
+        def list_users(self, page=None, per_page=None):
+            return list(auth_users.values()) if page == 1 else []
+
+        def get_user_by_id(self, uid):
+            return SimpleNamespace(user=auth_users[uid])
+
+    class Client:
+        auth = SimpleNamespace(admin=Admin())
+
+        def table(self, table):
+            return Query(table)
+
+    monkeypatch.setattr(orgs, "service_client", lambda: Client())
+
+    members = list_org_members("org-1")
+
+    emails = {member["email"] for member in members}
+    assert "ranbir.kumar2023@vitstudent.ac.in" in emails
+    missing = next(
+        member
+        for member in members
+        if member["email"] == "ranbir.kumar2023@vitstudent.ac.in"
+    )
+    assert missing["role"] == "user"

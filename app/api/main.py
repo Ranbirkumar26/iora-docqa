@@ -1,5 +1,6 @@
 """FastAPI app. API under /api; serves the built web SPA (web/out) at /."""
 import logging
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,6 +22,11 @@ from pydantic import BaseModel, EmailStr, Field
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+
+try:
+    from supabase_auth.errors import AuthRetryableError
+except Exception:  # pragma: no cover - defensive for SDK version drift
+    AuthRetryableError = None
 
 from app.config import (
     APP_BASE_URL,
@@ -127,6 +133,12 @@ async def _security_headers(request: Request, call_next):
         "Content-Security-Policy" if CSP_ENFORCE else "Content-Security-Policy-Report-Only"
     )
     response.headers.setdefault(csp_header, _CSP)
+    if request.method in {"GET", "HEAD"} and (
+        request.url.path in {"/", "/index.html"}
+        or request.url.path.startswith("/_next/static/chunks/app/")
+    ):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -247,6 +259,30 @@ def _session_payload(res) -> dict:
     }
 
 
+def _registered_email(user) -> str:
+    if isinstance(user, dict):
+        return str(user.get("email") or "").strip().lower()
+    return str(getattr(user, "email", "") or "").strip().lower()
+
+
+def _email_already_registered(email: str) -> bool:
+    """Best-effort duplicate signup check against Supabase Auth admin users."""
+    try:
+        admin = service_client().auth.admin
+        page = 1
+        per_page = 1000
+        while page <= 20:
+            users = admin.list_users(page=page, per_page=per_page) or []
+            if any(_registered_email(user) == email for user in users):
+                return True
+            if len(users) < per_page:
+                break
+            page += 1
+    except Exception:
+        return False
+    return False
+
+
 def get_auth_context(authorization: str = Header(None)) -> AuthContext:
     """Verify Bearer JWT and return user + active organisation context."""
     if not authorization or not authorization.startswith("Bearer "):
@@ -270,9 +306,9 @@ def signup(request: Request, body: AuthIn):
     """Create an account and send a confirmation email.
 
     Uses the public sign-up flow so Supabase emails a verification link; with
-    "Confirm email" enabled the user must verify before logging in. The response
-    is generic and never reveals whether an email already has an account. The org
-    membership is created lazily on the first authenticated request (get_user_org).
+    "Confirm email" enabled the user must verify before logging in. Duplicate
+    email sign-ups are surfaced with a clear message. The org membership is
+    created lazily on the first authenticated request (get_user_org).
     """
     email = (body.email or "").strip().lower()
     if not email_domain_allowed(email):
@@ -280,6 +316,8 @@ def signup(request: Request, body: AuthIn):
     pw_err = validate_password(body.password)
     if pw_err:
         raise HTTPException(400, pw_err)
+    if _email_already_registered(email):
+        raise HTTPException(409, "Email already exists. Please log in instead.")
     try:
         res = fresh_anon_client().auth.sign_up(
             {
@@ -597,6 +635,9 @@ async def upload(
                 "reason": f"type '{ext or '?'}' not supported (allowed: {allowed})",
             })
             continue
+        if not data:
+            skipped.append({"filename": uf.filename, "reason": "empty file"})
+            continue
 
         action, info = dedupe_check(
             ctx.write_scope_id,
@@ -903,6 +944,7 @@ def status(ctx: AuthContext = Depends(get_auth_context)):
         "org_enabled": ctx.org_enabled,
         "user_id": ctx.user_id,
         "role": ctx.role,
+        "is_super_admin": ctx.is_super_admin,
         "can_read_all": ctx.can_read_all,
         "can_write_all": ctx.can_write_all,
         "is_read_only": ctx.is_read_only,
@@ -950,16 +992,80 @@ def _is_bootstrap_member(user_id: str) -> bool:
         return False
 
 
+def _require_not_super_admin_target(member_user_id: str, action: str) -> None:
+    if _is_bootstrap_member(member_user_id):
+        raise HTTPException(403, f"Cannot {action} the Super Admin")
+
+
+_TRANSIENT_ADMIN_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+_TRANSIENT_ADMIN_TEXT = (
+    "temporar",
+    "timeout",
+    "timed out",
+    "rate limit",
+    "too many requests",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "connection",
+)
+
+
+def _auth_admin_status_code(exc: Exception) -> int | None:
+    for attr in ("status_code", "status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    if exc.args and isinstance(exc.args[0], dict):
+        data = exc.args[0]
+        for key in ("status_code", "status", "code"):
+            value = data.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+    return None
+
+
+def _is_retryable_auth_admin_error(exc: Exception) -> bool:
+    retryable_types = (httpx.TransportError,)
+    if AuthRetryableError is not None:
+        retryable_types = retryable_types + (AuthRetryableError,)
+    if isinstance(exc, retryable_types):
+        return True
+    status_code = _auth_admin_status_code(exc)
+    if status_code in _TRANSIENT_ADMIN_STATUS_CODES:
+        return True
+    message = str(exc).lower()
+    return any(token in message for token in _TRANSIENT_ADMIN_TEXT)
+
+
+def _retry_auth_admin_call(operation, *, attempts: int = 3, base_delay: float = 0.4):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except Exception as exc:
+            last_exc = exc
+            if attempt == attempts - 1 or not _is_retryable_auth_admin_error(exc):
+                raise
+            time.sleep(base_delay * (attempt + 1))
+    raise last_exc
+
+
 @api.post("/members/{member_user_id}/suspend")
 def suspend_member_endpoint(
     member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
 ):
     _require_admin(ctx)
-    if _is_bootstrap_member(member_user_id):
-        raise HTTPException(403, "Cannot suspend a bootstrap admin")
+    _require_not_super_admin_target(member_user_id, "suspend")
     try:
-        service_client().auth.admin.update_user_by_id(
-            member_user_id, {"ban_duration": "876000h"}
+        _retry_auth_admin_call(
+            lambda: service_client().auth.admin.update_user_by_id(
+                member_user_id, {"ban_duration": "876000h"}
+            )
         )
     except Exception:
         raise HTTPException(400, "Could not suspend user")
@@ -972,9 +1078,12 @@ def unsuspend_member_endpoint(
     member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
 ):
     _require_admin(ctx)
+    _require_not_super_admin_target(member_user_id, "reinstate")
     try:
-        service_client().auth.admin.update_user_by_id(
-            member_user_id, {"ban_duration": "none"}
+        _retry_auth_admin_call(
+            lambda: service_client().auth.admin.update_user_by_id(
+                member_user_id, {"ban_duration": "none"}
+            )
         )
     except Exception:
         raise HTTPException(400, "Could not reinstate user")
@@ -987,10 +1096,9 @@ def remove_member_endpoint(
     member_user_id: str, ctx: AuthContext = Depends(get_auth_context)
 ):
     _require_admin(ctx)
-    if _is_bootstrap_member(member_user_id):
-        raise HTTPException(403, "Cannot remove a bootstrap admin")
+    _require_not_super_admin_target(member_user_id, "remove")
     try:
-        delete_account(member_user_id)
+        _retry_auth_admin_call(lambda: delete_account(member_user_id))
     except Exception:
         raise HTTPException(500, "Could not remove user")
     write_audit(ctx.organization_id, ctx.user_id, "remove", member_user_id)
@@ -1009,8 +1117,9 @@ def mfa_reset_endpoint(
 ):
     """Admin recovery: clear a locked-out user's MFA factors."""
     _require_admin(ctx)
+    _require_not_super_admin_target(member_user_id, "reset MFA for")
     try:
-        removed = mfa.admin_reset(member_user_id)
+        removed = _retry_auth_admin_call(lambda: mfa.admin_reset(member_user_id))
     except Exception:
         raise HTTPException(400, "Could not reset MFA for this user")
     write_audit(
