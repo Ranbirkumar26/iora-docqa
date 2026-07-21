@@ -1,0 +1,17 @@
+entrypoint = "app/api/main.py"
+run = "bash scripts/replit-start.sh"
+
+[nix]
+channel = "stable-24_05"
+
+[gitHubImport]
+requiredFiles = [".replit", "replit.nix"]
+
+[deployment]
+deploymentTarget = "cloudrun"
+build = ["bash", "scripts/replit-build.sh"]
+run = ["bash", "scripts/replit-start.sh"]
+
+[[ports]]
+localPort = 8000
+externalPort = 80

@@ -203,9 +203,19 @@ A legacy Streamlit UI remains in `frontend/app.py` for quick local poking:
 
 ## Deploy
 
-Single container: Streamlit-free, FastAPI serves SPA + API on `$PORT`.
+FastAPI serves the exported SPA at `/` and the API at `/api` on `$PORT`.
 
-- **Railway** (current): `railway up` from the repo root (project already linked).
+- **Replit** (recommended while Railway is unavailable): import
+  `https://github.com/Ranbirkumar26/iora-docqa`, keep the included `.replit`
+  and `replit.nix`, then publish with the included deployment config. The build
+  command is `bash scripts/replit-build.sh`; the run command is
+  `bash scripts/replit-start.sh`.
+  Add production Secrets for `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+  `SUPABASE_SERVICE_KEY`, `GEMINI_API_KEY`, optional `GROQ_API_KEY` /
+  `QWEN_API_KEY`, `APP_ADMIN_EMAILS=rk26.ftw@gmail.com`,
+  `DEFAULT_ORGANIZATION_NAME=iORA Workspace`, and `APP_BASE_URL=<your Replit URL>`.
+  Add the same Replit URL to Supabase Auth redirect URLs.
+- **Railway**: `railway up` from the repo root when the Railway plan is active.
   Set the secrets as service variables (Supabase + LLM keys).
 - **Render**: push to GitHub, New -> Blueprint (reads `render.yaml`), set the secrets.
 - **Local Docker**:
