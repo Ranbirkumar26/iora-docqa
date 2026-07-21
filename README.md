@@ -1,7 +1,7 @@
 # iORA DocQA
 
 **Public repository:** https://github.com/Ranbirkumar26/iora-docqa
-**Live deployment:** https://docqa-production.up.railway.app
+**Live deployment:** https://docqa-chi.vercel.app
 
 Upload txt/md/csv/xlsx/pdf/docx files, ask questions and get summaries grounded in your documents.
 Files persist per user and accumulate into one queryable corpus across sessions.
