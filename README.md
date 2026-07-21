@@ -1,15 +1,16 @@
 # iORA DocQA
 
-**Repository copy:** https://github.com/Ranbirkumar26/iora-docqa-copy
-**Live deployment:** https://iora-docqa-copy-production.up.railway.app
+**Public repository:** https://github.com/Ranbirkumar26/iora-docqa
+**Live deployment:** https://docqa-production.up.railway.app
 
 Upload txt/md/csv/xlsx/pdf/docx files, ask questions and get summaries grounded in your documents.
 Files persist per user and accumulate into one queryable corpus across sessions.
 Responsive web app: works on desktop and mobile browsers, light/dark theme.
 All users join one shared organisation workspace for access control. Uploaded
 documents and generated outputs remain private to the account that created them.
-New accounts start as `user`; only configured admin email(s) can manage role
-upgrades.
+New emails request access first. After an admin approves the request in Access
+Control, the user can create the account, confirm the email, and start as
+`user`; only configured admin email(s) can manage role upgrades.
 
 ## Current Additions
 
@@ -20,6 +21,8 @@ upgrades.
   token, never from request input, so no one (admin included) can reset another account or
   see any password (passwords are stored only as bcrypt hashes by Supabase Auth).
 - User-private corpus data with one shared workspace for role management.
+- Approval-based signup: new emails submit an access request first; admins approve or
+  reject requests from the Access Control tab before a Supabase account is created.
 - Saved report history as a private knowledge repository.
 - Durable conversation history and generated outputs, so Ask/Summary/Report
   content survives navigation and refreshes after the schema is applied.
@@ -163,8 +166,8 @@ Reorder anytime with the `LLM_CHAIN` env var, no code change.
    link back to it). Email flows need Supabase SMTP enabled with "Confirm email" ON
    (Auth -> Settings) and `APP_BASE_URL` added under Auth -> URL Configuration ->
    Redirect URLs. Enable TOTP under Auth -> Multi-Factor for two-factor. Optional:
-   `APP_ALLOWED_EMAIL_DOMAINS` (restrict sign-ups), `CSP_ENFORCE=true` (enforce CSP
-   instead of report-only).
+   `APP_ALLOWED_EMAIL_DOMAINS` (restrict who can request signup access),
+   `CSP_ENFORCE=true` (enforce CSP instead of report-only).
 2. Apply `app/db/schema.sql` in the Supabase SQL editor; create a private storage
    bucket named `user-documents`. Re-run the schema after updates; it includes
    idempotent `alter table ... add column if not exists` and backfill SQL for

@@ -150,6 +150,19 @@ create table if not exists audit_events (
     created_at      timestamptz not null default now()
 );
 
+-- access requests captured before a Supabase Auth user is created
+create table if not exists signup_requests (
+    id           uuid primary key default gen_random_uuid(),
+    email        text not null unique,
+    status       text not null default 'pending'
+                 check (status in ('pending', 'approved', 'rejected')),
+    requested_at timestamptz not null default now(),
+    decided_at   timestamptz,
+    decided_by   uuid references auth.users(id) on delete set null,
+    created_at   timestamptz not null default now(),
+    updated_at   timestamptz not null default now()
+);
+
 -- per-user profile / about details
 create table if not exists profiles (
     user_id     uuid primary key references auth.users(id) on delete cascade,
@@ -183,6 +196,8 @@ create index if not exists idx_organizations_created_by on organizations(created
 create index if not exists idx_reports_user on reports(user_id);
 create index if not exists idx_jobs_user on processing_jobs(user_id);
 create index if not exists idx_audit_org_created on audit_events(organization_id, created_at desc);
+create index if not exists idx_signup_requests_status_requested on signup_requests(status, requested_at desc);
+create unique index if not exists idx_signup_requests_email_lower on signup_requests(lower(email));
 
 -- Backfill existing users/rows when this schema is applied to an older project.
 -- All users join the shared workspace. Only the bootstrap admin email is

@@ -9,6 +9,7 @@ import {
   GeneratedOutput,
   MemberRow,
   Memory,
+  SignupRequestRow,
   Status,
 } from "@/lib/api";
 import { Alert, Badge, Card, GhostButton } from "@/components/ui";
@@ -43,6 +44,12 @@ const ROLE_TONE = {
   user: "zinc",
   author: "amber",
   admin: "emerald",
+} as const;
+
+const REQUEST_TONE = {
+  pending: "amber",
+  approved: "emerald",
+  rejected: "zinc",
 } as const;
 
 function memberIsSuperAdmin(member: MemberRow) {
@@ -86,6 +93,7 @@ export default function Dashboard({
   const [memories, setMemories] = useState<Memory[]>([]);
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [signupRequests, setSignupRequests] = useState<SignupRequestRow[]>([]);
   const [extractions, setExtractions] = useState<GeneratedOutput[]>([]);
   const [attachExport, setAttachExport] = useState(false);
   const [exportBusy, setExportBusy] = useState<"markdown" | "txt" | null>(null);
@@ -119,9 +127,21 @@ export default function Dashboard({
         }
         if (membersRes.data) setMembers(membersRes.data.members);
         if (auditRes.data) setAudit(auditRes.data.events);
+        if (s.data.is_super_admin) {
+          const requestsRes = await call<{ requests: SignupRequestRow[] }>(
+            "GET",
+            "/signup-requests",
+            { token },
+          );
+          if (requestsRes.status === 401) return onAuthExpired();
+          if (requestsRes.data) setSignupRequests(requestsRes.data.requests);
+        } else {
+          setSignupRequests([]);
+        }
       } else {
         setMembers([]);
         setAudit([]);
+        setSignupRequests([]);
       }
     }
     if (f.data) setFiles(f.data.files);
@@ -209,6 +229,26 @@ export default function Dashboard({
     if (r.status === 401) return onAuthExpired();
     if (r.error) return setAccessMessage(r.error);
     setAccessMessage(`2FA reset (${r.data?.removed ?? 0} factor(s) removed).`);
+    refresh();
+  }
+
+  async function decideSignupRequest(
+    requestId: string,
+    status: "approved" | "rejected",
+  ) {
+    setAccessMessage(null);
+    const r = await call<{ request: SignupRequestRow }>(
+      "PATCH",
+      `/signup-requests/${requestId}`,
+      { token, json: { status } },
+    );
+    if (r.status === 401) return onAuthExpired();
+    if (r.error) return setAccessMessage(r.error);
+    setAccessMessage(
+      status === "approved"
+        ? "Signup request approved. The user can now create their account."
+        : "Signup request rejected.",
+    );
     refresh();
   }
 
@@ -487,9 +527,13 @@ export default function Dashboard({
   const adminCount = members.filter(
     (member) => member.role === "admin" || memberIsSuperAdmin(member),
   ).length;
+  const pendingSignupCount = signupRequests.filter(
+    (request) => request.status === "pending",
+  ).length;
+  const canApproveSignups = status?.is_super_admin === true;
   const accessPanel = (
     <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className={`grid gap-3 ${canApproveSignups ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Card className="p-4">
           <p className="text-2xl font-bold">{members.length}</p>
           <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-faint">
@@ -502,6 +546,14 @@ export default function Dashboard({
             Admins
           </p>
         </Card>
+        {canApproveSignups && (
+          <Card className="p-4">
+            <p className="text-2xl font-bold">{pendingSignupCount}</p>
+            <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-faint">
+              Pending Requests
+            </p>
+          </Card>
+        )}
         <Card className="p-4">
           <p className="truncate text-sm font-semibold text-fg">
             {superAdmin?.email || "rk26.ftw@gmail.com"}
@@ -514,6 +566,77 @@ export default function Dashboard({
 
       {accessMessage && (
         <Alert onClose={() => setAccessMessage(null)}>{accessMessage}</Alert>
+      )}
+
+      {canApproveSignups && (
+        <Card className="overflow-hidden">
+          <div className="border-b border-edge bg-inset/50 px-4 py-3">
+            <h3 className="text-sm font-semibold text-fg">Signup Requests</h3>
+            <p className="mt-1 text-xs text-faint">
+              Approve an email before it can create a DocQA account.
+            </p>
+          </div>
+          {signupRequests.length === 0 ? (
+            <p className="p-4 text-sm text-faint">No signup requests yet.</p>
+          ) : (
+            <div className="divide-y divide-edge">
+              {signupRequests.map((request) => {
+                const isPending = request.status === "pending";
+                return (
+                  <div
+                    key={request.id}
+                    className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto]"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="min-w-0 truncate text-sm font-medium text-fg">
+                          {request.email}
+                        </p>
+                        <Badge tone={REQUEST_TONE[request.status]}>
+                          {request.status}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-[11px] text-faint">
+                        Requested{" "}
+                        {request.requested_at
+                          ? new Date(request.requested_at).toLocaleString()
+                          : "recently"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                      {isPending ? (
+                        <>
+                          <button
+                            onClick={() =>
+                              decideSignupRequest(request.id, "approved")
+                            }
+                            className="min-h-10 rounded-lg border border-emerald-600/40 px-3 text-xs font-medium text-emerald-700 transition hover:bg-emerald-500/10 dark:text-emerald-300"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() =>
+                              decideSignupRequest(request.id, "rejected")
+                            }
+                            className="min-h-10 rounded-lg border border-edge-strong px-3 text-xs font-medium text-muted transition hover:bg-inset hover:text-fg"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-faint">
+                          {request.decided_at
+                            ? new Date(request.decided_at).toLocaleString()
+                            : "Decision saved"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
       )}
 
       <Card className="overflow-hidden">

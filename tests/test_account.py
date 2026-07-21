@@ -117,6 +117,12 @@ def _wire(
     anon_auth = _Auth(admin, signin_ok, signup_session, signup_raises)
     monkeypatch.setattr(main, "service_client", lambda: _Client(_Auth(admin)))
     monkeypatch.setattr(main, "fresh_anon_client", lambda: _Client(anon_auth))
+    monkeypatch.setattr(main, "is_signup_approved", lambda email: True)
+    monkeypatch.setattr(
+        main,
+        "create_signup_request",
+        lambda email: {"id": "r1", "email": email, "status": "pending"},
+    )
     return admin, anon_auth
 
 
@@ -153,6 +159,40 @@ def test_change_password_too_short_is_rejected(client, monkeypatch):
 
 
 # ---------- signup with email confirmation ----------
+def test_signup_creates_access_request_until_approved(client, monkeypatch):
+    _, anon_auth = _wire(monkeypatch, signup_session=False)
+    created = {}
+    monkeypatch.setattr(main, "is_signup_approved", lambda email: False)
+    monkeypatch.setattr(
+        main,
+        "create_signup_request",
+        lambda email: created.setdefault(
+            "request", {"id": "r1", "email": email, "status": "pending"}
+        ),
+    )
+    r = client.post(
+        "/api/auth/signup", json={"email": "New@X.com", "password": "secret12"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["approval_required"] is True
+    assert "approval" in body["message"].lower()
+    assert created["request"]["email"] == "new@x.com"
+    assert anon_auth.signed_up is None
+
+
+def test_signup_bootstrap_admin_bypasses_access_request(client, monkeypatch):
+    _, anon_auth = _wire(monkeypatch, signup_session=False)
+    monkeypatch.setattr(main, "is_signup_approved", lambda email: False)
+    r = client.post(
+        "/api/auth/signup",
+        json={"email": "rk26.ftw@gmail.com", "password": "secret12"},
+    )
+    assert r.status_code == 200
+    assert r.json()["needs_confirmation"] is True
+    assert anon_auth.signed_up is not None
+
+
 def test_signup_requires_confirmation_when_no_session(client, monkeypatch):
     _wire(monkeypatch, signup_session=False)
     r = client.post("/api/auth/signup", json={"email": "New@X.com", "password": "secret12"})
@@ -359,9 +399,9 @@ def test_delete_account_purges_storage_setnull_tables_then_user(monkeypatch):
 
 
 # ---------- suspend / remove member (admin) ----------
-def _admin_override():
+def _admin_override(is_super_admin=False):
     app.dependency_overrides[get_auth_context] = lambda: AuthContext(
-        "admin1", "o1", "W", role="admin"
+        "admin1", "o1", "W", role="admin", is_super_admin=is_super_admin
     )
     main.limiter.enabled = False
 
@@ -416,6 +456,68 @@ def test_admin_remove_member_calls_delete(monkeypatch):
         app.dependency_overrides.clear()
     assert r.status_code == 200
     assert called["uid"] == "target1"
+
+
+def test_admin_lists_signup_requests(monkeypatch):
+    _admin_override(is_super_admin=True)
+    monkeypatch.setattr(
+        main,
+        "list_signup_requests",
+        lambda: [{"id": "r1", "email": "new@example.com", "status": "pending"}],
+    )
+    try:
+        r = TestClient(app).get("/api/signup-requests")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert r.json()["requests"][0]["email"] == "new@example.com"
+
+
+def test_admin_approves_signup_request(monkeypatch):
+    _admin_override(is_super_admin=True)
+    saved = {}
+
+    def set_status(request_id, status, organization_id=None, actor_user_id=None):
+        saved.update(
+            {
+                "request_id": request_id,
+                "status": status,
+                "organization_id": organization_id,
+                "actor_user_id": actor_user_id,
+            }
+        )
+        return {"id": request_id, "email": "new@example.com", "status": status}
+
+    monkeypatch.setattr(main, "set_signup_request_status", set_status)
+    try:
+        r = TestClient(app).patch(
+            "/api/signup-requests/r1", json={"status": "approved"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200
+    assert r.json()["request"]["status"] == "approved"
+    assert saved == {
+        "request_id": "r1",
+        "status": "approved",
+        "organization_id": "o1",
+        "actor_user_id": "admin1",
+    }
+
+
+def test_signup_requests_require_admin(client):
+    r = client.get("/api/signup-requests")
+    assert r.status_code == 403
+
+
+def test_signup_requests_require_super_admin(monkeypatch):
+    _admin_override(is_super_admin=False)
+    try:
+        r = TestClient(app).get("/api/signup-requests")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 403
+    assert r.json()["detail"] == "Super Admin access required"
 
 
 def test_suspend_requires_admin(client, monkeypatch):

@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
+from typing import Literal
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -68,6 +69,12 @@ from app.core.outputs import (
 from app.core.qa import ask
 from app.core.report import generate_report, get_report, list_reports
 from app.core.search import search_chunks
+from app.core.signup_requests import (
+    create_signup_request,
+    is_signup_approved,
+    list_signup_requests,
+    set_signup_request_status,
+)
 from app.core.summarize import summarize
 from app.db.client import anon_client, fresh_anon_client, service_client
 
@@ -165,6 +172,11 @@ def _require_admin(ctx: AuthContext) -> None:
         raise HTTPException(403, "Admin access required")
 
 
+def _require_super_admin(ctx: AuthContext) -> None:
+    if not ctx.is_super_admin:
+        raise HTTPException(403, "Super Admin access required")
+
+
 @app.exception_handler(RuntimeError)
 def _runtime_error(request: Request, exc: RuntimeError):
     # e.g. Gemini rate limit -> clean 429 the UI can show
@@ -245,6 +257,10 @@ class ProfileIn(BaseModel):
     bio: str | None = Field(default=None, max_length=1000)
 
 
+class SignupRequestDecisionIn(BaseModel):
+    status: Literal["approved", "rejected"]
+
+
 def _session_payload(res) -> dict:
     session = getattr(res, "session", None)
     user = getattr(res, "user", None)
@@ -303,12 +319,11 @@ def get_auth_context(authorization: str = Header(None)) -> AuthContext:
 @api.post("/auth/signup")
 @limiter.limit("5/minute")
 def signup(request: Request, body: AuthIn):
-    """Create an account and send a confirmation email.
+    """Request or create an account, depending on admin approval state.
 
-    Uses the public sign-up flow so Supabase emails a verification link; with
-    "Confirm email" enabled the user must verify before logging in. Duplicate
-    email sign-ups are surfaced with a clear message. The org membership is
-    created lazily on the first authenticated request (get_user_org).
+    Normal users first create an access request. Once an admin approves that
+    email, the same signup form creates the Supabase Auth account and sends the
+    confirmation email. Bootstrap admins bypass this approval gate.
     """
     email = (body.email or "").strip().lower()
     if not email_domain_allowed(email):
@@ -318,6 +333,16 @@ def signup(request: Request, body: AuthIn):
         raise HTTPException(400, pw_err)
     if _email_already_registered(email):
         raise HTTPException(409, "Email already exists. Please log in instead.")
+    if not is_bootstrap_admin(email) and not is_signup_approved(email):
+        create_signup_request(email)
+        return {
+            "approval_required": True,
+            "needs_confirmation": True,
+            "message": (
+                "Access request sent for admin approval. After approval, "
+                "create your account again to receive the confirmation email."
+            ),
+        }
     try:
         res = fresh_anon_client().auth.sign_up(
             {
@@ -954,6 +979,35 @@ def status(ctx: AuthContext = Depends(get_auth_context)):
 
 
 # ---------- organisation members ----------
+@api.get("/signup-requests")
+def signup_requests_endpoint(ctx: AuthContext = Depends(get_auth_context)):
+    _require_admin(ctx)
+    _require_super_admin(ctx)
+    return {"requests": list_signup_requests()}
+
+
+@api.patch("/signup-requests/{request_id}")
+def decide_signup_request_endpoint(
+    request_id: str,
+    body: SignupRequestDecisionIn,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    _require_admin(ctx)
+    _require_super_admin(ctx)
+    try:
+        saved = set_signup_request_status(
+            request_id,
+            body.status,
+            organization_id=ctx.organization_id,
+            actor_user_id=ctx.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if not saved:
+        raise HTTPException(404, "Signup request not found")
+    return {"request": saved}
+
+
 @api.get("/members")
 def members_endpoint(ctx: AuthContext = Depends(get_auth_context)):
     _require_admin(ctx)

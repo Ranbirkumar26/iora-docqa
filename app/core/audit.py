@@ -24,6 +24,7 @@ def write_audit(
     action: str,
     target_user_id: str | None = None,
     detail: str | None = None,
+    target_email: str | None = None,
 ) -> None:
     """Record one audit event. Swallows all errors — auditing is never allowed
     to fail the action it is logging."""
@@ -34,6 +35,7 @@ def write_audit(
                 "actor_user_id": actor_user_id,
                 "action": action,
                 "target_user_id": target_user_id,
+                "target_email": target_email,
                 "detail": detail,
             }
         ).execute()
@@ -46,7 +48,9 @@ def list_audit(organization_id: str, limit: int = 100) -> list[dict]:
         return (
             service_client()
             .table("audit_events")
-            .select("id, actor_user_id, action, target_user_id, detail, created_at")
+            .select(
+                "id, actor_user_id, action, target_user_id, target_email, detail, created_at"
+            )
             .eq("organization_id", organization_id)
             .order("created_at", desc=True)
             .limit(limit)

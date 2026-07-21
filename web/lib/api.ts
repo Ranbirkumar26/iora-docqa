@@ -228,6 +228,17 @@ export type MemberRow = {
   created_at: string;
 };
 
+export type SignupRequestRow = {
+  id: string;
+  email: string;
+  status: "pending" | "approved" | "rejected";
+  requested_at?: string | null;
+  decided_at?: string | null;
+  decided_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 export type SummarizeResponse = {
   summary: string;
   mode: "direct" | "rag" | "none";
