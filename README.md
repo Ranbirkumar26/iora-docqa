@@ -215,6 +215,11 @@ FastAPI serves the exported SPA at `/` and the API at `/api` on `$PORT`.
   `QWEN_API_KEY`, `APP_ADMIN_EMAILS=rk26.ftw@gmail.com`,
   `DEFAULT_ORGANIZATION_NAME=iORA Workspace`, and `APP_BASE_URL=<your Replit URL>`.
   Add the same Replit URL to Supabase Auth redirect URLs.
+- **Vercel** (temporary): the repo includes `vercel.json`, `api/index.py`, and
+  `scripts/vercel-build.sh`. Deploy from the repo root with `vercel --prod`.
+  Set the same Supabase/LLM environment variables in Vercel and point
+  `APP_BASE_URL` at the generated Vercel production URL. Add that URL to
+  Supabase Auth redirect URLs.
 - **Railway**: `railway up` from the repo root when the Railway plan is active.
   Set the secrets as service variables (Supabase + LLM keys).
 - **Render**: push to GitHub, New -> Blueprint (reads `render.yaml`), set the secrets.

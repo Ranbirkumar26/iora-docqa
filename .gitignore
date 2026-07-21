@@ -25,3 +25,7 @@ web/.next/
 web/out/
 web/next-env.d.ts
 web/*.tsbuildinfo
+public/
+
+# Local Netlify folder
+.netlify
