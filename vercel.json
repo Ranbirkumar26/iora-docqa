@@ -1,20 +1,23 @@
 {
-  "buildCommand": "bash scripts/vercel-build.sh",
-  "outputDirectory": "public",
-  "installCommand": "python3 -m pip install -r requirements.txt",
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 60
+  "services": {
+    "docqa": {
+      "root": ".",
+      "entrypoint": "api.index:app",
+      "buildCommand": "bash scripts/vercel-build.sh",
+      "installCommand": "python3 -m pip install -r requirements-vercel.txt",
+      "functions": {
+        "api/index.py": {
+          "maxDuration": 60
+        }
+      }
     }
   },
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/((?!_next/.*|.*\\..*).*)",
-      "destination": "/index.html"
+      "source": "/(.*)",
+      "destination": {
+        "service": "docqa"
+      }
     }
   ]
 }

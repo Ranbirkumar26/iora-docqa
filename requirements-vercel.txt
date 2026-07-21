@@ -1,0 +1,16 @@
+# Slim production dependencies for Vercel's Python function size limit.
+fastapi
+python-multipart
+python-dotenv
+slowapi
+email-validator
+
+pandas
+openpyxl
+pypdf
+python-docx
+duckdb
+
+google-genai
+supabase
+requests
